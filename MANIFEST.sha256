@@ -1,6 +1,6 @@
 915f96d2ce3f8df03e9adb3eca7773298a56d6f71f7750ac04e01f8dcfae89e4  ./.gitignore
-0bde76b741549c5def0c39cbf9acc17b3c0bda112301a40091efb69683c3fd6c  ./README.md
-ae86de6831769061415d47d7ff4f4931dbdc486e7e95c35a9fa27eaa7ca255bd  ./docs/arquitetura.md
-1ffec3a425d33c55f9cd6190cf8f8c8a53b3ceb819e29cc21fc51934ce2a1b18  ./docs/musica.schema.json
-0dd0262fcd8a8ebd8be9471aec4129b08cbdbe41300ba4d8ad56ad592b1db1a9  ./examples/musica.exemplo.json
+24be4284c77ed1911272acfd7378bfdc86805238f809809e93d195adcdf0b555  ./README.md
+6bbe3a6835717a041550198dcbaeddd9e00f7f805781741c7741e5a3b67951dd  ./docs/arquitetura.md
+2d86315368ea90a68ced9e95e3a85f054016695c46d6a44f4003c2a1017ac69d  ./docs/musica.schema.json
+571e4f6b7d54b61ef77be0a2ca69accb263d47b840d6b0d67b111bea9d23d024  ./examples/musica.exemplo.json
 cb22a3c715ec93c86cd4f8bf7cbc84f91a07c017654cbdf7e83b83bdbdabdbdf  ./instruments.json

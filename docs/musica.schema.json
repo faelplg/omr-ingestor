@@ -1,14 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "omr-ingestor/musica.schema.json",
-  "title": "Manifesto musica.json",
+  "title": "musica.json manifest",
   "type": "object",
   "required": ["titulo", "itens", "estilo"],
   "additionalProperties": false,
   "properties": {
-    "_exemplo": {"type": "string", "description": "Só em arquivos de exemplo"},
+    "_exemplo": {"type": "string", "description": "Only in example files"},
     "titulo": {"type": "string", "minLength": 1},
-    "estilo": {"type": "string", "minLength": 1, "description": "Caminho do .mss aplicado com -S"},
+    "estilo": {"type": "string", "minLength": 1, "description": "Path of the .mss style applied with -S"},
     "itens": {
       "type": "array", "minItems": 1,
       "items": {
@@ -19,7 +19,7 @@
           "pdf": {"type": "string", "minLength": 1},
           "instrumento": {"enum": ["bb-trumpet", "trombone", "flute", "alto-saxophone", "tenor-saxophone", "tuba"]},
           "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-          "compassos_esperados": {"type": "integer", "minimum": 1, "description": "Denominador do critério de até 5% corrigido"}
+          "compassos_esperados": {"type": "integer", "minimum": 1, "description": "Denominator of the up-to-5% hand-corrected criterion"}
         }
       }
     }

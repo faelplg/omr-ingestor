@@ -1,30 +1,30 @@
-# Arquitetura do omr-ingestor
+# omr-ingestor architecture
 
-Fluxo planejado. Diagrama **inferido**: só a etapa 5 (`-S`) foi testada; o resto não rodou. Fonte: estudo OMR (v4, 04/11/2026).
+Planned flow. The diagram is **inferred**: only stage 5 (`-S`) has been tested; the rest has not run. Source: OMR study (v4, 2026-11-04).
 
 ```mermaid
 flowchart TB
-  subgraph MAN["Entrada (Mac do Rafael, PDFs não saem dele)"]
-    MJ["musica.json (manifesto)<br/>itens: PDF, instrumento, sha256<br/>compassos_esperados, caminho do estilo"]
+  subgraph MAN["Input (author's Mac, PDFs never leave it)"]
+    MJ["musica.json (manifest)<br/>items: PDF, instrument, sha256<br/>expected measures, style path"]
   end
 
-  subgraph PIPE["Pipeline por item (uma pasta por parte, idempotente)"]
-    AUD["1. Audiveris 5.11.0<br/>-batch -export<br/>confere nº de .mxl, não só o exit code"]
-    UNZ["Descompacta .mxl<br/>trata vários movimentos e páginas"]
-    XSD1["2. XSD MusicXML 4.0 (xmllint, local)"]
-    DUR["3. Duração por compasso<br/>suspeitos vão para o relatório"]
-    DIV["Aviso: instrumento informado<br/>diverge da clave/faixa lida"]
-    FIX["4. Ajuste do instrumento (opção B)<br/>transpose, clave, part-name, layout<br/>valida o próprio resultado"]
-    XSD2["XSD de novo, depois do ajuste"]
-    MS["5. MuseScore 4.7.5 com -S<br/>Estilo 2026.mss (lote via -j)"]
-    VF["6. Check final no .mscx do .mscz<br/>instrumento, transposição, clave,<br/>tamanho de página do estilo"]
-    OUT[".mscz formatado"]
+  subgraph PIPE["Per-item pipeline (one folder per part, idempotent)"]
+    AUD["1. Audiveris 5.11.0<br/>-batch -export<br/>checks the number of .mxl files, not just the exit code"]
+    UNZ["Unzip .mxl<br/>handles multiple movements and pages"]
+    XSD1["2. MusicXML 4.0 XSD (xmllint, local)"]
+    DUR["3. Duration per measure<br/>suspect measures go to the report"]
+    DIV["Warning: given instrument<br/>differs from the clef/range read"]
+    FIX["4. Instrument fix-up (option B)<br/>transpose, clef, part-name, layout<br/>validates its own result"]
+    XSD2["XSD again, after the fix-up"]
+    MS["5. MuseScore 4.7.5 with -S<br/>Estilo 2026.mss (batch via -j)"]
+    VF["6. Final check on the .mscx inside the .mscz<br/>instrument, transposition, clef,<br/>page size from the style"]
+    OUT["formatted .mscz"]
   end
 
-  TAB["instruments.json<br/>tabela dos 6 instrumentos"]
-  REP["status.json por item<br/>etapas, compassos suspeitos,<br/>tempos, versões das ferramentas"]
-  HUM["Revisão humana: Rafael toca e confere<br/>corrigidos_a_mao: lista de compassos<br/>meta: até 5% (denominador = compassos_esperados)"]
-  LOTE["Lote: check entre as 5 partes<br/>mesmo nº de compassos"]
+  TAB["instruments.json<br/>table of the 6 instruments"]
+  REP["status.json per item<br/>stages, suspect measures,<br/>timings, tool versions"]
+  HUM["Human review: the author plays it and checks<br/>corrigidos_a_mao: list of measures<br/>goal: up to 5% (denominator = compassos_esperados)"]
+  LOTE["Batch: check across the 5 parts<br/>same number of measures"]
 
   MJ --> AUD --> UNZ --> XSD1
   XSD1 -- FAIL --> HUM
@@ -36,34 +36,34 @@ flowchart TB
   DUR -.-> REP
   VF -.-> REP
   OUT --> HUM
-  HUM -- "corrige e reentra" --> XSD1
+  HUM -- "fixes and re-enters" --> XSD1
   HUM --> REP
   OUT --> LOTE
 
-  subgraph BANC["Bancada de medição (só Cientista, na box, domínio público)"]
-    GAB["Gabarito MIDI"]
-    PR["Precisão e revocação<br/>onset + altura, tempo por página"]
+  subgraph BANC["Measurement bench (research only, public-domain scores)"]
+    GAB["MIDI ground truth"]
+    PR["Precision and recall<br/>onset + pitch, time per page"]
   end
   UNZ -.-> PR
   GAB -.-> PR
 ```
 
-## Etapas
+## Stages
 
-1. **Audiveris.** Roda `-batch -export` no PDF. Confere o número de `.mxl` gerados, não só o exit code. Descompacta e trata vários movimentos.
-2. **XSD.** Valida o MusicXML contra o XSD 4.0 local (xmllint). Falhou, vai para revisão humana.
-3. **Duração por compasso.** Lista compassos que não fecham no `status.json`.
-4. **Ajuste do instrumento.** Aplica `instruments.json` ao instrumento informado: `<transpose>`, clave, nome, som; apaga layout de página do OMR. Marca de ensaio nos compassos suspeitos. Roda XSD de novo.
-5. **MuseScore.** Converte para `.mscz` com `-S "Estilo 2026.mss"`.
-6. **Check final no `.mscx`.** Abre o `.mscz`, lê o `.mscx` e confere instrumento, transposição, clave e tamanho de página do estilo.
+1. **Audiveris.** Runs `-batch -export` on the PDF. Checks the number of `.mxl` files produced, not just the exit code. Unzips and handles multiple movements.
+2. **XSD.** Validates the MusicXML against the local 4.0 XSD (xmllint). On failure, it goes to human review.
+3. **Duration per measure.** Lists measures that do not add up in `status.json`.
+4. **Instrument fix-up.** Applies `instruments.json` to the given instrument: `<transpose>`, clef, name, sound; removes the OMR page layout. Adds a rehearsal mark on suspect measures. Runs the XSD again.
+5. **MuseScore.** Converts to `.mscz` with `-S "Estilo 2026.mss"`.
+6. **Final check on the `.mscx`.** Opens the `.mscz`, reads the `.mscx` and checks instrument, transposition, clef and the style's page size.
 
-Depois: revisão humana (Rafael toca e corrige), reentrada pelo XSD, e em lote o check de mesmo número de compassos entre as partes.
+After that: human review (the author plays and corrects), re-entry through the XSD, and, in batch mode, a check that all parts have the same number of measures.
 
-## Decisões já tomadas
+## Decisions already made
 
-- Instrumento é informado no envio, um dos 6 ids de `instruments.json`; o pipeline não adivinha pelo PDF — informado (Rafael, 03/11/2026).
-- Critério de aceite: até 5% dos compassos corrigidos à mão por parte; denominador = `compassos_esperados` — informado (03/11/2026).
-- Compasso cuja duração não fecha vira marca de ensaio no `.mscz` e o fluxo segue; a lista vai no `status.json` — informado (04/11/2026). Se a marca sobrevive ao `-S`: palpite, não testado.
-- `-S` com MusicXML validado no MuseScore 4.7.5 em 04/11/2026: estilo no `.mscz` idêntico ao Estilo 2026 (diff 0, A5 paisagem) — medido, 1 arquivo com 2 partes.
-- Check final no `.mscx` é obrigatório porque o exit code do `mscore` não é confiável (saiu 134 com arquivo gerado) — medido (04/11/2026).
-- Roda no Mac do Rafael; PDFs não saem de lá — informado (03/11/2026).
+- The instrument is given at submission time, one of the 6 ids in `instruments.json`; the pipeline does not guess it from the PDF. Provided by the author (2026-11-03).
+- Acceptance criterion: up to 5% of the measures corrected by hand per part; denominator = `compassos_esperados`. Provided (2026-11-03).
+- A measure whose duration does not add up becomes a rehearsal mark in the `.mscz` and the flow continues; the list goes in `status.json`. Provided (2026-11-04). Whether the mark survives `-S` is a guess, untested.
+- `-S` with validated MusicXML on MuseScore 4.7.5 on 2026-11-04: the style in the `.mscz` is identical to Estilo 2026 (diff 0, A5 landscape). Measured, 1 file with 2 parts.
+- The final check on the `.mscx` is mandatory because the `mscore` exit code is not reliable (it exited 134 with the file generated). Measured (2026-11-04).
+- Runs on the author's Mac; PDFs never leave it. Provided (2026-11-03).

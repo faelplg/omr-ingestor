@@ -1,29 +1,29 @@
 # omr-ingestor
 
-Pipeline local que pega um PDF de partitura (uma parte, um de 6 instrumentos de sopro), passa por OMR e entrega um `.mscz` do MuseScore com o instrumento certo (transposição, clave, nome) e o "Estilo 2026" aplicado.
+Local pipeline that takes a sheet-music PDF (one part, for one of 6 wind instruments), runs OMR on it, and produces a MuseScore `.mscz` file with the right instrument (transposition, clef, name) and the "Estilo 2026" style applied.
 
-## Estado
+## Status
 
-**Esqueleto, nada implementado.** Este repo tem só documentação, a tabela de instrumentos e o schema do manifesto. Nenhum script roda ainda.
+**Skeleton, nothing implemented.** This repo only holds documentation, the instrument table and the manifest schema. No script runs yet.
 
-## Como vai rodar (planejado)
+## How it will run (planned)
 
-- Roda no Mac do Rafael (arm64), por linha de comando.
-- Entrada: um `musica.json` (ver `docs/musica.schema.json` e `examples/musica.exemplo.json`) que lista os PDFs, o instrumento de cada um (informado no envio, nunca adivinhado) e o número de compassos esperado.
-- Saída: um `.mscz` por parte + `status.json` por item, em `saidas/` (fora do git).
-- Etapas e decisões: `docs/arquitetura.md`.
+- Runs on the author's Mac (arm64), from the command line.
+- Input: a `musica.json` manifest (see `docs/musica.schema.json` and `examples/musica.exemplo.json`) that lists the PDFs, the instrument of each one (provided at submission time, never guessed) and the expected number of measures.
+- Output: one `.mscz` per part plus a `status.json` per item, in `saidas/` (kept out of git).
+- Stages and decisions: `docs/arquitetura.md`.
 
-## PDFs não saem do Mac
+## PDFs never leave the Mac
 
-Os PDFs são do Rafael (comprados ou de editora). Não entram no git (`.gitignore` ignora `*.pdf`), não vão para servidor nem para outra máquina. Testes fora do Mac usam só arquivos de domínio público ou sintéticos.
+The PDFs are the author's own (purchased or from a publisher). They are not committed (`.gitignore` ignores `*.pdf`) and are never sent to a server or to another machine. Tests outside the Mac use only public-domain or synthetic files.
 
-## Ferramentas externas e licenças
+## External tools and licenses
 
-O pipeline chama programas instalados à parte, por linha de comando. Nenhum código deles é copiado ou modificado aqui.
+The pipeline calls separately installed programs from the command line. None of their code is copied or modified here.
 
-| Ferramenta | Versão alvo | Licença | Uso |
+| Tool | Target version | License | Use |
 |---|---|---|---|
 | Audiveris | 5.11.0 | AGPL-3.0 | OMR: PDF → MusicXML (`-batch -export`) |
-| MuseScore Studio | 4.7.5 | GPL v3 | MusicXML → `.mscz` com estilo (`-S`, `-o`) |
+| MuseScore Studio | 4.7.5 | GPL v3 | MusicXML → `.mscz` with style (`-S`, `-o`) |
 
-Se um dia virar serviço para outras pessoas, revisar a AGPL do Audiveris antes.
+If this ever becomes a service for other people, review Audiveris's AGPL first.
