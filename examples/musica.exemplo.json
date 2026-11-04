@@ -1,0 +1,9 @@
+{
+  "_exemplo": "EXEMPLO com dados fictícios: título, caminhos, sha256 e compassos são inventados.",
+  "titulo": "EXEMPLO - Música Fictícia",
+  "estilo": "/Users/fael/Documents/MuseScore4/Styles/Estilo 2026.mss",
+  "itens": [
+    {"pdf": "pdfs/exemplo-trompete.pdf", "instrumento": "bb-trumpet", "sha256": "0000000000000000000000000000000000000000000000000000000000000000", "compassos_esperados": 64},
+    {"pdf": "pdfs/exemplo-sax-tenor.pdf", "instrumento": "tenor-saxophone", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "compassos_esperados": 64}
+  ]
+}
