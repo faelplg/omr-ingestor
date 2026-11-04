@@ -5,7 +5,7 @@ Planned flow. The diagram is **inferred**: only stage 5 (`-S`) has been tested; 
 ```mermaid
 flowchart TB
   subgraph MAN["Input (author's Mac, PDFs never leave it)"]
-    MJ["musica.json (manifest)<br/>items: PDF, instrument, sha256<br/>expected measures, style path"]
+    MJ["music.json (manifest)<br/>items: PDF, instrument, sha256<br/>expected measures, style path"]
   end
 
   subgraph PIPE["Per-item pipeline (one folder per part, idempotent)"]
@@ -23,7 +23,7 @@ flowchart TB
 
   TAB["instruments.json<br/>table of the 6 instruments"]
   REP["status.json per item<br/>stages, suspect measures,<br/>timings, tool versions"]
-  HUM["Human review: the author plays it and checks<br/>corrigidos_a_mao: list of measures<br/>goal: up to 5% (denominator = compassos_esperados)"]
+  HUM["Human review: the author plays it and checks<br/>hand_corrected: list of measures<br/>goal: up to 5% (denominator = expected_measures)"]
   LOTE["Batch: check across the 5 parts<br/>same number of measures"]
 
   MJ --> AUD --> UNZ --> XSD1
@@ -62,7 +62,7 @@ After that: human review (the author plays and corrects), re-entry through the X
 ## Decisions already made
 
 - The instrument is given at submission time, one of the 6 ids in `instruments.json`; the pipeline does not guess it from the PDF. Provided by the author (2026-11-03).
-- Acceptance criterion: up to 5% of the measures corrected by hand per part; denominator = `compassos_esperados`. Provided (2026-11-03).
+- Acceptance criterion: up to 5% of the measures corrected by hand per part; denominator = `expected_measures`. Provided (2026-11-03).
 - A measure whose duration does not add up becomes a rehearsal mark in the `.mscz` and the flow continues; the list goes in `status.json`. Provided (2026-11-04). Whether the mark survives `-S` is a guess, untested.
 - `-S` with validated MusicXML on MuseScore 4.7.5 on 2026-11-04: the style in the `.mscz` is identical to Estilo 2026 (diff 0, A5 landscape). Measured, 1 file with 2 parts.
 - The final check on the `.mscx` is mandatory because the `mscore` exit code is not reliable (it exited 134 with the file generated). Measured (2026-11-04).

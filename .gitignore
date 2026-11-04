@@ -1,6 +1,6 @@
 *.pdf
 *.PDF
-saidas/
+output/
 *.mscz
 __pycache__/
 .DS_Store

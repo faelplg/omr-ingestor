@@ -9,9 +9,9 @@ Local pipeline that takes a sheet-music PDF (one part, for one of 6 wind instrum
 ## How it will run (planned)
 
 - Runs on the author's Mac (arm64), from the command line.
-- Input: a `musica.json` manifest (see `docs/musica.schema.json` and `examples/musica.exemplo.json`) that lists the PDFs, the instrument of each one (provided at submission time, never guessed) and the expected number of measures.
-- Output: one `.mscz` per part plus a `status.json` per item, in `saidas/` (kept out of git).
-- Stages and decisions: `docs/arquitetura.md`.
+- Input: a `music.json` manifest (see `docs/music.schema.json` and `examples/music.example.json`) that lists the PDFs, the instrument of each one (provided at submission time, never guessed) and the expected number of measures.
+- Output: one `.mscz` per part plus a `status.json` per item, in `output/` (kept out of git).
+- Stages and decisions: `docs/architecture.md`.
 
 ## PDFs never leave the Mac
 

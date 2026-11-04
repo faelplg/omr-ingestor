@@ -1,8 +1,8 @@
 [
-  {"id": "bb-trumpet", "nome_pt": "Trompete em Sib", "clave": "G2", "transpose": {"diatonic": -1, "chromatic": -2, "octave_change": 0}, "fonte": "estudo OMR"},
-  {"id": "trombone", "nome_pt": "Trombone (Dó)", "clave": "F4", "transpose": {"diatonic": 0, "chromatic": 0, "octave_change": 0}, "fonte": "estudo OMR"},
-  {"id": "flute", "nome_pt": "Flauta (Dó)", "clave": "G2", "transpose": {"diatonic": 0, "chromatic": 0, "octave_change": 0}, "fonte": "estudo OMR"},
-  {"id": "alto-saxophone", "nome_pt": "Sax alto em Mib", "clave": "G2", "transpose": {"diatonic": -5, "chromatic": -9, "octave_change": 0}, "fonte": "estudo OMR"},
-  {"id": "tenor-saxophone", "nome_pt": "Sax tenor em Sib", "clave": "G2", "transpose": {"diatonic": -1, "chromatic": -2, "octave_change": -1}, "fonte": "estudo OMR"},
-  {"id": "tuba", "nome_pt": "Tuba (Dó)", "clave": "F4", "transpose": {"diatonic": 0, "chromatic": 0, "octave_change": 0}, "fonte": "estudo OMR"}
+  {"id": "bb-trumpet", "name_pt": "Trompete em Sib", "clef": "G2", "transpose": {"diatonic": -1, "chromatic": -2, "octave_change": 0}, "source": "OMR study"},
+  {"id": "trombone", "name_pt": "Trombone (Dó)", "clef": "F4", "transpose": {"diatonic": 0, "chromatic": 0, "octave_change": 0}, "source": "OMR study"},
+  {"id": "flute", "name_pt": "Flauta (Dó)", "clef": "G2", "transpose": {"diatonic": 0, "chromatic": 0, "octave_change": 0}, "source": "OMR study"},
+  {"id": "alto-saxophone", "name_pt": "Sax alto em Mib", "clef": "G2", "transpose": {"diatonic": -5, "chromatic": -9, "octave_change": 0}, "source": "OMR study"},
+  {"id": "tenor-saxophone", "name_pt": "Sax tenor em Sib", "clef": "G2", "transpose": {"diatonic": -1, "chromatic": -2, "octave_change": -1}, "source": "OMR study"},
+  {"id": "tuba", "name_pt": "Tuba (Dó)", "clef": "F4", "transpose": {"diatonic": 0, "chromatic": 0, "octave_change": 0}, "source": "OMR study"}
 ]

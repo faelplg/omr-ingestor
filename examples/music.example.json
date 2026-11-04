@@ -1,0 +1,9 @@
+{
+  "_example": "EXAMPLE with fictional data: title, paths, sha256 and measure counts are made up.",
+  "title": "EXAMPLE - Fictional Song",
+  "style": "~/Documents/MuseScore4/Styles/Estilo 2026.mss",
+  "items": [
+    {"pdf": "pdfs/example-trumpet.pdf", "instrument": "bb-trumpet", "sha256": "0000000000000000000000000000000000000000000000000000000000000000", "expected_measures": 64},
+    {"pdf": "pdfs/example-tenor-sax.pdf", "instrument": "tenor-saxophone", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "expected_measures": 64}
+  ]
+}
