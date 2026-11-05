@@ -5,7 +5,10 @@ Layout of the per-item folder `<output_dir>/<pdf stem>/`:
     status.json           rewritten (atomically) after every stage
     audiveris/            Audiveris output and the unzipped raw MusicXML
     <stem>.musicxml       the MusicXML after the instrument fix-up
-    <stem>.mscz           the MuseScore file with the style applied
+    <stem>.mscz           the MuseScore file with the style applied, published only
+                          after the final check passes
+    <stem>.staged.mscz    the new MuseScore output while it waits for the final check
+    <stem>.rejected.mscz  the last output that failed the final check, kept to inspect
 
 Everything is recomputed on each run, from the PDF, so a rerun gives the same files.
 The human review (hand_corrected) is kept from the previous status.json.
@@ -83,6 +86,8 @@ class ItemPaths:
     audiveris_dir: Path
     musicxml: Path
     mscz: Path
+    staged_mscz: Path
+    rejected_mscz: Path
 
     @classmethod
     def for_item(cls, output_dir: Path, pdf: str) -> "ItemPaths":
@@ -94,6 +99,8 @@ class ItemPaths:
             audiveris_dir=item_dir / AUDIVERIS_DIR,
             musicxml=item_dir / f"{stem}.musicxml",
             mscz=item_dir / f"{stem}.mscz",
+            staged_mscz=item_dir / f"{stem}.staged.mscz",
+            rejected_mscz=item_dir / f"{stem}.rejected.mscz",
         )
 
 
@@ -287,17 +294,27 @@ def _xsd_after_fixup(ctx: _Context) -> str:
 
 
 def _musescore(ctx: _Context) -> str:
+    # Staged, so a bad conversion never replaces the last good .mscz (see _mscx_check).
+    staged = ctx.paths.staged_mscz
     result = musescore.convert_to_mscz(
-        ctx.paths.musicxml, ctx.style, ctx.paths.mscz, musescore=ctx.tools.musescore
+        ctx.paths.musicxml, ctx.style, staged, musescore=ctx.tools.musescore
     )
     ctx.set_version("musescore", result.version)
-    return f"{ctx.paths.mscz.name}, exit code {result.exit_code}"
+    return f"{staged.name}, exit code {result.exit_code}"
 
 
 def _mscx_check(ctx: _Context) -> str:
-    result = mscx_check.check_mscz(ctx.paths.mscz, ctx.instrument, page_size=ctx.page_size)
-    if not result.passed:
-        raise StageError("; ".join(c.describe() for c in result.failures))
+    """Check the staged .mscz; publish it on success, move it aside as rejected otherwise."""
+    paths = ctx.paths
+    try:
+        result = mscx_check.check_mscz(paths.staged_mscz, ctx.instrument, page_size=ctx.page_size)
+        if not result.passed:
+            raise StageError("; ".join(c.describe() for c in result.failures))
+    except (MscxCheckError, StageError) as exc:
+        os.replace(paths.staged_mscz, paths.rejected_mscz)
+        raise StageError(f"{exc} (kept as {paths.rejected_mscz.name})") from exc
+    os.replace(paths.staged_mscz, paths.mscz)
+    paths.rejected_mscz.unlink(missing_ok=True)
     return "; ".join(c.describe() for c in result.checks)
 
 

@@ -251,6 +251,29 @@ def test_wrong_mscx_fails_the_final_check(setup: Setup, monkeypatch: pytest.Monk
     assert "instrument: FAIL (found flute, expected bb-trumpet)" in (
         status.stage("mscx_check").detail
     )
+    assert not (setup.item_dir / f"{STEM}.mscz").exists()
+
+
+def test_rejected_rerun_keeps_the_previous_mscz(setup: Setup, monkeypatch):
+    assert setup.run() == 0
+    mscz = setup.item_dir / f"{STEM}.mscz"
+    good = mscz.read_bytes()
+
+    monkeypatch.setenv(MUSESCORE_ENV_VAR, str(fake_musescore(setup.bin, trumpet_mscx("flute"))))
+    assert setup.run() == 1
+    assert mscz.read_bytes() == good
+    status = setup.status()
+    assert states(status)["mscx_check"] == "failed"
+    assert f"kept as {STEM}.rejected.mscz" in status.stage("mscx_check").detail
+    rejected = setup.item_dir / f"{STEM}.rejected.mscz"
+    with zipfile.ZipFile(rejected) as zf:
+        assert 'Instrument id="flute"' in zf.read("score.mscx").decode()
+    assert not (setup.item_dir / f"{STEM}.staged.mscz").exists()
+
+    # A later good run publishes again and drops the rejected file.
+    monkeypatch.setenv(MUSESCORE_ENV_VAR, str(fake_musescore(setup.bin, trumpet_mscx())))
+    assert setup.run() == 0
+    assert not rejected.exists()
 
 
 def test_page_size_comes_from_the_style(setup: Setup):
