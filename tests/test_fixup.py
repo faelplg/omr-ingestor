@@ -19,6 +19,8 @@ OMR_HEADER = (
 OMR_SCORE_PART = (
     '<score-part id="P1"><part-name>Voice</part-name>'
     "<part-name-display><display-text>Voice</display-text></part-name-display>"
+    "<part-abbreviation>Pno.</part-abbreviation>"
+    "<part-abbreviation-display><display-text>Pno.</display-text></part-abbreviation-display>"
     '<score-instrument id="P1-I1"><instrument-name>Piano</instrument-name></score-instrument>'
     '<score-instrument id="P1-I2"><instrument-name>Organ</instrument-name></score-instrument>'
     '<midi-instrument id="P1-I1"><midi-channel>3</midi-channel>'
@@ -38,6 +40,14 @@ PRINT = (
 C_CLEF = "<attributes><clef><sign>C</sign><line>4</line></clef></attributes>"
 Q = note(1)
 I2_NOTE = note(1, extra='<instrument id="P1-I2"/>')
+# Mid-part switches to P1-I2: a standalone <sound> and one inside a <direction>.
+SWITCH_TO_I2 = (
+    '<sound><midi-instrument id="P1-I2"><midi-program>20</midi-program></midi-instrument></sound>'
+    '<direction><direction-type><words>Organ</words></direction-type><sound tempo="90">'
+    '<instrument-change id="P1-I2"><instrument-sound>keyboard.organ</instrument-sound>'
+    '</instrument-change><midi-instrument id="P1-I2"><midi-program>20</midi-program>'
+    "</midi-instrument></sound></direction>"
+)
 
 
 def omr_score() -> str:
@@ -46,7 +56,7 @@ def omr_score() -> str:
             "P1": [
                 measure(1, PRINT + FIRST_ATTRS + Q * 4, attrs=' width="300"'),
                 measure(2, Q * 3, attrs=' width="250"'),
-                measure(3, PRINT + C_CLEF + I2_NOTE * 4),
+                measure(3, PRINT + C_CLEF + SWITCH_TO_I2 + I2_NOTE * 4),
             ]
         },
         header=OMR_HEADER,
@@ -88,6 +98,25 @@ def test_tenor_sax_gets_transpose_clef_name_and_sound():
         "67",
     )
     assert {i.get("id") for i in root.iterfind("part/measure/note/instrument")} == {"P1-I1"}
+
+
+def test_no_reference_to_a_removed_instrument_remains():
+    root = fixed("flute")
+    kept = {i.get("id") for i in root.iterfind("part-list/score-part/score-instrument")}
+    assert kept == {"P1-I1"}
+    refs = {el.get("id") for el in root.find("part").iterfind("measure//*")} - {None}
+    assert refs <= kept
+    m3 = root.find("part/measure[@number='3']")
+    # The empty standalone <sound> goes; the one with a tempo stays, without the switch.
+    assert m3.find("sound") is None
+    assert ET.tostring(m3.find("direction/sound"), encoding="unicode") == '<sound tempo="90" />'
+
+
+def test_old_abbreviations_and_display_names_are_removed():
+    sp = fixed("flute").find("part-list/score-part")
+    for tag in ("part-name-display", "part-abbreviation", "part-abbreviation-display"):
+        assert sp.find(tag) is None
+    assert "Pno." not in ET.tostring(sp, encoding="unicode")
 
 
 def test_concert_pitch_instrument_has_no_transpose_and_one_clef():

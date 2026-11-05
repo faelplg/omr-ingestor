@@ -75,6 +75,8 @@ _ATTRIBUTES_ORDER = (
 )
 _LAYOUT_IN_DEFAULTS = ("page-layout", "system-layout", "staff-layout")
 _TIMED = ("note", "backup", "forward")
+# <sound> children that refer to a score-instrument id.
+_SOUND_INSTRUMENT_CHILDREN = ("instrument-change", "midi-device", "midi-instrument", "play")
 
 
 def _insert_ordered(parent: ET.Element, child: ET.Element, order: tuple[str, ...]) -> None:
@@ -112,8 +114,10 @@ def _set_name_and_sound(
         name = ET.Element("part-name")
         _insert_ordered(score_part, name, _SCORE_PART_ORDER)
     name.text = instrument.name_pt
-    # A display name from the OMR would hide the part-name just set.
-    _remove_all(score_part, "part-name-display")
+    # OMR display names and abbreviations would show the old name; the table has no
+    # abbreviation to put in their place.
+    for tag in ("part-name-display", "part-abbreviation", "part-abbreviation-display"):
+        _remove_all(score_part, tag)
 
     first = score_part.find("score-instrument")
     inst_id = first.get("id") if first is not None else f"{score_part.get('id')}-I1"
@@ -135,6 +139,18 @@ def _set_name_and_sound(
     # Notes may point at score-instruments that were just removed.
     for ref in part.iterfind("measure/note/instrument"):
         ref.set("id", inst_id)
+    _remove_instrument_changes(part)
+
+
+def _remove_instrument_changes(part: ET.Element) -> None:
+    """Drop mid-part instrument switches in <sound>; the part now has one instrument."""
+    for measure in part.findall("measure"):
+        for parent in (measure, *measure.findall("direction")):
+            for snd in parent.findall("sound"):
+                for tag in _SOUND_INSTRUMENT_CHILDREN:
+                    _remove_all(snd, tag)
+                if len(snd) == 0 and not snd.attrib:
+                    parent.remove(snd)
 
 
 def _set_clef_and_transpose(part: ET.Element, instrument: Instrument) -> None:
