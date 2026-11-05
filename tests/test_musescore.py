@@ -137,3 +137,16 @@ def test_binary_not_configured(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv(MUSESCORE_ENV_VAR, raising=False)
     with pytest.raises(MuseScoreError, match=MUSESCORE_ENV_VAR):
         resolve_musescore()
+
+
+def test_relative_binary_resolves_to_absolute_path(
+    tmp_path: Path, inputs, monkeypatch: pytest.MonkeyPatch
+):
+    xml, style = inputs
+    exe = fake_musescore(tmp_path)
+    monkeypatch.chdir(exe.parent)
+    assert resolve_musescore("./mscore") == exe
+    assert resolve_musescore("./mscore").is_absolute()
+    result = convert_to_mscz(xml, style, tmp_path / "o.mscz", musescore="./mscore")
+    assert result.version == "4.7.5"
+    check_mscz(result.output)

@@ -224,3 +224,14 @@ def test_unzip_missing_root_member_fails(tmp_path: Path):
     mxl = write_mxl(tmp_path / "a.mxl", {"a.xml": "<a/>"}, root="missing.xml")
     with pytest.raises(AudiverisError, match="missing from the archive"):
         unzip_mxl(mxl)
+
+
+def test_relative_binary_resolves_to_absolute_path(
+    tmp_path: Path, pdf: Path, monkeypatch: pytest.MonkeyPatch
+):
+    exe = fake_audiveris(tmp_path, ["{stem}.mxl"])
+    monkeypatch.chdir(exe.parent)
+    assert resolve_audiveris("./Audiveris") == exe
+    assert resolve_audiveris("./Audiveris").is_absolute()
+    result = run_audiveris(pdf, tmp_path / "out", audiveris="./Audiveris")
+    assert result.musicxml_files[0].exists()

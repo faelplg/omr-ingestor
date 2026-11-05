@@ -56,7 +56,8 @@ def resolve_audiveris(audiveris: str | Path | None = None) -> Path:
             )
     raw = str(audiveris)
     found = shutil.which(raw) if os.sep not in raw else raw
-    exe = Path(found).expanduser() if found else None
+    # Absolute, so subprocess never searches PATH for a relative name like "Audiveris".
+    exe = Path(found).expanduser().absolute() if found else None
     if exe is None or not exe.is_file() or not os.access(exe, os.X_OK):
         raise AudiverisError(f"Audiveris executable not found or not executable: {raw}")
     return exe
