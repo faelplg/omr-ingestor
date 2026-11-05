@@ -1,3 +1,4 @@
+import re
 import zipfile
 from dataclasses import replace
 from pathlib import Path
@@ -217,4 +218,18 @@ def test_zip_without_mscx_raises(tmp_path):
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr("score_style.mss", style_xml())
     with pytest.raises(MscxCheckError, match=r"expected one top-level \.mscx, found 0"):
+        check_mscz(path, INSTRUMENTS["flute"])
+
+
+@pytest.mark.parametrize("member", ["score.mscx", "score_style.mss", "META-INF/container.xml"])
+def test_corrupt_member_raises(tmp_path, member):
+    path = mscz_for(tmp_path, "flute")
+    with zipfile.ZipFile(path) as zf:
+        info = zf.getinfo(member)
+    data = bytearray(path.read_bytes())
+    # Flip one byte of the stored (uncompressed) data; the zip directory stays intact.
+    data_start = info.header_offset + 30 + len(info.filename.encode()) + len(info.extra)
+    data[data_start] ^= 0xFF
+    path.write_bytes(bytes(data))
+    with pytest.raises(MscxCheckError, match=f"{re.escape(member)}: cannot read zip member"):
         check_mscz(path, INSTRUMENTS["flute"])

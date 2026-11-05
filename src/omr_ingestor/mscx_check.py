@@ -11,6 +11,7 @@ transposeChromatic, and the written clef is the header <Clef> of the first measu
 
 import xml.etree.ElementTree as ET
 import zipfile
+import zlib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -91,6 +92,14 @@ def _parse(data: bytes, where: str) -> ET.Element:
         raise MscxCheckError(f"{where}: not well-formed XML at line {line}, column {col}") from exc
 
 
+def _read_member(zf: zipfile.ZipFile, name: str, source: str) -> bytes:
+    """Read one member; a corrupt member (bad CRC, truncated data) raises MscxCheckError."""
+    try:
+        return zf.read(name)
+    except (zipfile.BadZipFile, zlib.error, EOFError, OSError) as exc:
+        raise MscxCheckError(f"{source}:{name}: cannot read zip member: {exc}") from exc
+
+
 def _is_main_mscx(name: str) -> bool:
     path = PurePosixPath(name)
     return path.suffix == ".mscx" and len(path.parts) == 1
@@ -99,7 +108,7 @@ def _is_main_mscx(name: str) -> bool:
 def _main_mscx_name(zf: zipfile.ZipFile, source: str) -> str:
     names = zf.namelist()
     if CONTAINER_PATH in names:
-        container = _parse(zf.read(CONTAINER_PATH), f"{source}:{CONTAINER_PATH}")
+        container = _parse(_read_member(zf, CONTAINER_PATH, source), f"{source}:{CONTAINER_PATH}")
         for rootfile in container.iterfind("rootfiles/rootfile"):
             path = rootfile.get("full-path", "")
             if _is_main_mscx(path) and path in names:
@@ -156,7 +165,7 @@ def _page_size(zf: zipfile.ZipFile, source: str) -> tuple[float, float] | str:
     """Page width and height in mm, or a description of why they cannot be read."""
     if STYLE_PATH not in zf.namelist():
         return f"no {STYLE_PATH}"
-    style = _parse(zf.read(STYLE_PATH), f"{source}:{STYLE_PATH}").find("Style")
+    style = _parse(_read_member(zf, STYLE_PATH, source), f"{source}:{STYLE_PATH}").find("Style")
     if style is None:
         return f"no <Style> in {STYLE_PATH}"
     values = []
@@ -193,7 +202,7 @@ def check_mscz(
         raise MscxCheckError(f"{source}: cannot open as a .mscz (zip): {exc}") from exc
     with zf:
         mscx = _main_mscx_name(zf, source)
-        root = _parse(zf.read(mscx), f"{source}:{mscx}")
+        root = _parse(_read_member(zf, mscx, source), f"{source}:{mscx}")
         score = root.find("Score")
         if score is None:
             raise MscxCheckError(f"{source}:{mscx}: no <Score> under <{root.tag}>")
