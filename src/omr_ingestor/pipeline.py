@@ -279,13 +279,17 @@ def _fixup(ctx: _Context) -> str:
     target = ctx.paths.musicxml
     tmp = target.with_name(f".{target.name}.tmp")
     try:
-        fix_instrument_file(
+        result = fix_instrument_file(
             ctx.raw_musicxml, tmp, ctx.instrument, part_id=part_id, suspect_measures=suspects
         )
         os.replace(tmp, target)
     finally:
         tmp.unlink(missing_ok=True)
-    return f"{ctx.instrument.id} applied to part {part_id}, {len(suspects)} mark(s)"
+    if result.suspects:
+        added = tuple(SuspectMeasure(s.measure, s.reason) for s in result.suspects)
+        ctx.status = replace(ctx.status, suspect_measures=ctx.status.suspect_measures + added)
+    detail = f"{ctx.instrument.id} applied to part {part_id}, {len(result.marked)} mark(s)"
+    return "; ".join([detail, *(r.describe() for r in result.rewrites)])
 
 
 def _xsd_after_fixup(ctx: _Context) -> str:

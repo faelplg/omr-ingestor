@@ -28,6 +28,7 @@ MARKER_NAME = ".omr-ingestor-audiveris"
 _CONTAINER = "META-INF/container.xml"
 _MUSICXML_MEDIA_TYPE = "application/vnd.recordare.musicxml+xml"
 _VERSION_RE = re.compile(r"Audiveris\D{0,20}?(\d+\.\d+(?:\.\d+)?)", re.IGNORECASE)
+_SOFTWARE_RE = re.compile(r"Audiveris\s+(\d+\.\d+(?:\.\d+)?\S*)", re.IGNORECASE)
 
 
 class AudiverisError(Exception):
@@ -105,6 +106,34 @@ def unzip_mxl(mxl: Path, dest: Path | None = None) -> Path:
         raise AudiverisError(f"{mxl}: not a readable .mxl (zip) file: {exc}") from exc
     dest.write_bytes(data)
     return dest
+
+
+def _encoding_version(musicxml: Path) -> str | None:
+    """The version in `<encoding><software>Audiveris 5.11.0</software>` of an export."""
+    try:
+        for _, el in ET.iterparse(musicxml):
+            if el.tag == "software":
+                match = _SOFTWARE_RE.fullmatch((el.text or "").strip())
+                if match:
+                    return match.group(1)
+            elif el.tag == "encoding":
+                return None
+    except (ET.ParseError, OSError):
+        pass
+    return None
+
+
+def audiveris_version(output: str, musicxml_files: tuple[Path, ...]) -> str | None:
+    """The Audiveris version from its MusicXML export, else from its console output.
+
+    Audiveris 5.11 prints no version in batch mode, but it signs every export.
+    """
+    for path in musicxml_files:
+        version = _encoding_version(path)
+        if version:
+            return version
+    match = _VERSION_RE.search(output)
+    return match.group(1) if match else None
 
 
 def _tail(text: str, lines: int = 20) -> str:
@@ -190,14 +219,15 @@ def run_audiveris(
     def moved(p: Path) -> Path:
         return output_dir / p.relative_to(staging)
 
-    match = _VERSION_RE.search(output)
+    result_files = tuple(moved(p) for p in musicxml_files)
+
     return AudiverisResult(
         pdf=pdf,
         output_dir=output_dir,
         mxl_files=tuple(moved(p) for p in mxl_files),
-        musicxml_files=tuple(moved(p) for p in musicxml_files),
+        musicxml_files=result_files,
         log_path=output_dir / LOG_NAME,
-        version=match.group(1) if match else None,
+        version=audiveris_version(output, result_files),
         exit_code=proc.returncode,
         duration_s=duration,
     )

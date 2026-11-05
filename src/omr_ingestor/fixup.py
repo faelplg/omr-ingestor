@@ -3,8 +3,12 @@
 The OMR result keeps its pitches; this stage only sets what the instrument decides
 (transposition, clef, name, sound), drops the OMR page layout so the MuseScore style
 can lay the score out, and marks suspect measures with a rehearsal mark.
+
+It also repairs one known Audiveris mistake with volta endings (see fix_volta_endings);
+each repair gets a rehearsal mark too, so the human review looks at it.
 """
 
+import itertools
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -225,6 +229,190 @@ def _add_marks(part: ET.Element, numbers: Iterable[str], text: str) -> None:
             measure.insert(at, direction)
 
 
+@dataclass(frozen=True, slots=True)
+class VoltaRewrite:
+    """One ending rebuilt by fix_volta_endings; first and last are measure numbers."""
+
+    number: str
+    first: str
+    last: str
+
+    def describe(self) -> str:
+        return f"ending {self.number} rejoined over measures {self.first}-{self.last}"
+
+
+@dataclass(frozen=True, slots=True)
+class VoltaSuspect:
+    measure: str
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class FixupResult:
+    rewrites: tuple[VoltaRewrite, ...] = ()
+    suspects: tuple[VoltaSuspect, ...] = ()
+    # Measure numbers that carry a rehearsal mark, in the order they were given.
+    marked: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class _Span:
+    """An ending bracket: measures[first..last], opened by `start`, closed by `end`."""
+
+    number: str
+    first: int
+    last: int
+    start: ET.Element
+    start_barline: ET.Element
+    end: ET.Element
+    end_barline: ET.Element
+
+
+_BARLINE_ORDER = {"left": 0, "middle": 1, "right": 2}
+_ENDING_STOPS = ("stop", "discontinue")
+DEFAULT_END_LENGTH = "30"
+
+
+def _ending_events(measure: ET.Element) -> list[tuple[ET.Element, ET.Element]]:
+    """(barline, ending) pairs of a measure, left barline first."""
+    barlines = sorted(
+        measure.findall("barline"),
+        key=lambda b: _BARLINE_ORDER.get(b.get("location", "right"), 2),
+    )
+    return [(b, e) for b in barlines for e in b.findall("ending")]
+
+
+def _has_backward_repeat(measure: ET.Element) -> bool:
+    return any(r.get("direction") == "backward" for r in measure.iterfind("barline/repeat"))
+
+
+def _ending_spans(measures: list[ET.Element]) -> tuple[list[_Span], VoltaSuspect | None]:
+    """Pair every ending start with its stop; a VoltaSuspect if they do not pair up."""
+    spans: list[_Span] = []
+    opened: tuple[str, int, ET.Element, ET.Element] | None = None
+    for i, measure in enumerate(measures):
+        for barline, ending in _ending_events(measure):
+            number, kind = ending.get("number", ""), ending.get("type")
+            problem = None
+            if kind == "start":
+                if opened is None:
+                    opened = (number, i, ending, barline)
+                else:
+                    problem = f"ending {number} starts before ending {opened[0]} ends"
+            elif kind in _ENDING_STOPS and opened is not None and opened[0] == number:
+                spans.append(_Span(number, opened[1], i, opened[2], opened[3], ending, barline))
+                opened = None
+            else:
+                problem = f"ending {number} {kind} does not close an open ending"
+            if problem:
+                return [], VoltaSuspect(measure.get("number", ""), f"{problem}; left as is")
+    if opened is not None:
+        measure = measures[opened[1]]
+        return [], VoltaSuspect(
+            measure.get("number", ""), f"ending {opened[0]} never ends; left as is"
+        )
+    return spans, None
+
+
+def _int_number(span: _Span) -> int | None:
+    return int(span.number) if span.number.isdigit() else None
+
+
+def _is_split_ending(p: _Span, r: _Span, n: _Span, measures: list[ET.Element]) -> bool:
+    """Audiveris cut ending p short and gave its rest (r, up to the repeat) a span of its own.
+
+    Unambiguous only when p, r and n touch, the only backward repeat from p to r closes
+    r, and the numbers read p=k, r=k or k+1, n=k+1.
+    """
+    if not (p.last + 1 == r.first and r.last + 1 == n.first):
+        return False
+    if not _has_backward_repeat(measures[r.last]):
+        return False
+    if any(_has_backward_repeat(measures[i]) for i in range(p.first, r.last)):
+        return False
+    k, rk, nk = _int_number(p), _int_number(r), _int_number(n)
+    return k is not None and rk in (k, k + 1) and nk == k + 1
+
+
+def _remove_ending(barline: ET.Element, ending: ET.Element, measure: ET.Element) -> None:
+    barline.remove(ending)
+    if len(barline) == 0:
+        measure.remove(barline)
+
+
+def _merge(p: _Span, r: _Span, measures: list[ET.Element]) -> VoltaRewrite:
+    """Make p run from its start to the end of r, closed with a stop on the repeat."""
+    _remove_ending(p.end_barline, p.end, measures[p.last])
+    _remove_ending(r.start_barline, r.start, measures[r.first])
+    r.end.set("number", p.number)
+    r.end.set("type", "stop")
+    if r.end.get("end-length") is None:
+        r.end.set("end-length", p.start.get("end-length") or DEFAULT_END_LENGTH)
+    return VoltaRewrite(
+        p.number, measures[p.first].get("number", ""), measures[r.last].get("number", "")
+    )
+
+
+def _span_label(span: _Span, measures: list[ET.Element]) -> str:
+    first, last = measures[span.first].get("number"), measures[span.last].get("number")
+    where = f"measure {first}" if span.first == span.last else f"measures {first}-{last}"
+    return f"ending {span.number} ({where})"
+
+
+def _doubtful_pairs(spans: list[_Span], measures: list[ET.Element]) -> list[VoltaSuspect]:
+    """Touching endings that look like the split-ending mistake but could not be fixed."""
+    suspects = []
+    for i, (a, b) in enumerate(itertools.pairwise(spans)):
+        if a.last + 1 != b.first:
+            continue
+        followed = i + 2 < len(spans) and spans[i + 2].first == b.last + 1
+        if a.number == b.number:
+            why = "has the same number as the ending right before it"
+        elif (
+            followed
+            and _has_backward_repeat(measures[b.last])
+            and not _has_backward_repeat(measures[a.last])
+        ):
+            why = "ends with the repeat although the ending before it has none"
+        else:
+            continue
+        reason = f"{_span_label(b, measures)} {why}; left as is"
+        suspects.extend(VoltaSuspect(measures[s.first].get("number", ""), reason) for s in (a, b))
+    return suspects
+
+
+def fix_volta_endings(part: ET.Element) -> tuple[list[VoltaRewrite], list[VoltaSuspect]]:
+    """Rejoin an ending that Audiveris split in two, in place. Safe to run twice.
+
+    Audiveris 5.11 can read a first ending that runs up to a backward repeat as a short
+    ending 1 (start, then discontinue) plus a second span numbered 1 or 2 that ends at
+    the repeat, followed by the real next ending. When that reading is unambiguous, the
+    two spans become one ending 1 that stops (with end-length) on the repeat measure.
+    Anything that looks like the mistake but does not fit exactly is left alone and
+    returned as suspect, as are endings whose starts and stops do not pair up.
+    """
+    measures = part.findall("measure")
+    rewrites: list[VoltaRewrite] = []
+    i = 0
+    while True:
+        spans, broken = _ending_spans(measures)
+        if broken is not None:
+            return rewrites, [broken]
+        hit = next(
+            (
+                j
+                for j in range(i, len(spans) - 2)
+                if _is_split_ending(spans[j], spans[j + 1], spans[j + 2], measures)
+            ),
+            None,
+        )
+        if hit is None:
+            return rewrites, _doubtful_pairs(spans, measures)
+        rewrites.append(_merge(spans[hit], spans[hit + 1], measures))
+        # After the merge the next ending sits at hit + 1.
+        i = hit + 1
+
+
 def fix_instrument(
     root: ET.Element,
     instrument: Instrument,
@@ -232,11 +420,12 @@ def fix_instrument(
     part_id: str | None = None,
     suspect_measures: Iterable[str] = (),
     mark_text: str = DEFAULT_MARK,
-) -> None:
+) -> FixupResult:
     """Apply an instrument to one part of the score, in place. Safe to run twice.
 
     part_id=None works on single-part scores. suspect_measures are measure numbers
-    (as in DurationReport.suspect_numbers); each gets a rehearsal mark with mark_text.
+    (as in DurationReport.suspect_numbers); each gets a rehearsal mark with mark_text,
+    as do the volta endings fix_volta_endings rewrote or found suspect.
     The page layout is removed from the whole score, since it is shared by all parts.
     """
     try:
@@ -248,10 +437,22 @@ def fix_instrument(
     part = find_part(root, part_id)
     score_part = _score_part(root, part.get("id", ""))
 
-    _add_marks(part, suspect_measures, mark_text)
+    rewrites, volta_suspects = fix_volta_endings(part)
+    volta_suspects = list(dict.fromkeys(volta_suspects))
+    marked = tuple(
+        dict.fromkeys(
+            [
+                *suspect_measures,
+                *(s.measure for s in volta_suspects),
+                *(r.first for r in rewrites),
+            ]
+        )
+    )
+    _add_marks(part, marked, mark_text)
     _set_name_and_sound(score_part, part, instrument, sound)
     _set_clef_and_transpose(part, instrument)
     remove_page_layout(root)
+    return FixupResult(tuple(rewrites), tuple(volta_suspects), marked)
 
 
 def fix_instrument_file(
@@ -262,10 +463,10 @@ def fix_instrument_file(
     part_id: str | None = None,
     suspect_measures: Iterable[str] = (),
     mark_text: str = DEFAULT_MARK,
-) -> None:
+) -> FixupResult:
     """Read src, apply fix_instrument, write dst (which may be src)."""
     root = read_musicxml(src)
-    fix_instrument(
+    result = fix_instrument(
         root,
         instrument,
         part_id=part_id,
@@ -273,3 +474,4 @@ def fix_instrument_file(
         mark_text=mark_text,
     )
     write_musicxml(root, dst)
+    return result

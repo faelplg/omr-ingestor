@@ -3,10 +3,16 @@ import xml.etree.ElementTree as ET
 import pytest
 
 from omr_ingestor.durations import check_durations
-from omr_ingestor.fixup import FixupError, fix_instrument, fix_instrument_file
+from omr_ingestor.fixup import (
+    FixupError,
+    VoltaRewrite,
+    fix_instrument,
+    fix_instrument_file,
+    fix_volta_endings,
+)
 from omr_ingestor.instruments import load_instruments
 from omr_ingestor.musicxml import MusicXMLError, parse_musicxml, read_musicxml
-from tests.musicxml_builders import measure, note, score
+from tests.musicxml_builders import barline, measure, note, score
 
 INSTRUMENTS = load_instruments()
 
@@ -206,3 +212,148 @@ def test_fix_instrument_file_round_trip(tmp_path):
     root = read_musicxml(dst)
     assert root.findtext(".//transpose/chromatic") == "-2"
     assert root.findtext(".//rehearsal") == "?"
+
+
+def start(number: str, **kwargs) -> str:
+    return barline("left", ending=(number, "start"), **kwargs)
+
+
+def stop(number: str, kind: str = "stop", *, repeat: bool = False, **kwargs) -> str:
+    return barline("right", ending=(number, kind), repeat="backward" if repeat else None, **kwargs)
+
+
+def volta_score(*bodies: str) -> str:
+    """Measure 1, then measure i + 2 with four quarters and the barlines in bodies[i]."""
+    ms = [measure(1, FIRST_ATTRS + Q * 4)]
+    ms += [measure(i, Q * 4 + body) for i, body in enumerate(bodies, 2)]
+    return score({"P1": ms}, score_parts=OMR_SCORE_PART)
+
+
+def volta_part(*bodies: str) -> ET.Element:
+    return parse_musicxml(volta_score(*bodies))
+
+
+def endings(root: ET.Element) -> list[tuple[str, str, str, str | None]]:
+    """(measure, number, type, end-length) of every ending, in document order."""
+    return [
+        (m.get("number"), e.get("number"), e.get("type"), e.get("end-length"))
+        for m in root.iterfind("part/measure")
+        for e in m.iterfind("barline/ending")
+    ]
+
+
+@pytest.mark.parametrize("second", ["2", "1"])
+def test_ending_split_by_audiveris_is_rejoined_up_to_the_repeat(second):
+    # Audiveris 5.11: ending 1 on one measure, then ending 2 (or 1 again) up to the
+    # repeat, then the real ending 2.
+    root = volta_part(
+        start("1", end_length="34") + stop("1", "discontinue"),
+        start(second),
+        "",
+        stop(second, repeat=True),
+        start("2") + stop("2", "discontinue"),
+    )
+    result = fix_instrument(root, INSTRUMENTS["bb-trumpet"])
+
+    assert endings(root) == [
+        ("2", "1", "start", "34"),
+        ("5", "1", "stop", "34"),
+        ("6", "2", "start", None),
+        ("6", "2", "discontinue", None),
+    ]
+    # The barlines that only held the removed endings are gone.
+    assert root.find("part/measure[@number='3']/barline") is None
+    assert [b.get("location") for b in root.iterfind("part/measure[@number='2']/barline")] == [
+        "left"
+    ]
+    assert result.rewrites == (VoltaRewrite("1", "2", "5"),)
+    assert result.suspects == ()
+    assert result.marked == ("2",)
+    assert root.findtext("part/measure[@number='2']/direction/direction-type/rehearsal") == "?"
+    # A second run finds nothing left to fix.
+    assert fix_volta_endings(root.find("part")) == ([], [])
+
+
+def test_rejoined_ending_keeps_its_own_end_length():
+    root = volta_part(
+        start("1") + stop("1", "discontinue"),
+        start("2"),
+        stop("2", repeat=True, end_length="37"),
+        start("2") + stop("2"),
+    )
+    fix_volta_endings(root.find("part"))
+    assert endings(root)[:2] == [("2", "1", "start", None), ("4", "1", "stop", "37")]
+
+
+@pytest.mark.parametrize(
+    "bodies",
+    [
+        # A plain first and second ending.
+        (start("1"), stop("1", repeat=True), start("2") + stop("2", "discontinue")),
+        # Three endings, each but the last closed by a repeat.
+        (
+            start("1") + stop("1", repeat=True),
+            start("2") + stop("2", repeat=True),
+            start("3") + stop("3", "discontinue"),
+        ),
+        # The same numbers in two separate volta sections.
+        (
+            start("1") + stop("1", repeat=True),
+            start("2") + stop("2"),
+            "",
+            start("1") + stop("1", repeat=True),
+            start("2") + stop("2"),
+        ),
+    ],
+)
+def test_correct_endings_are_left_alone(bodies):
+    root = volta_part(*bodies)
+    before = ET.tostring(root.find("part"))
+    assert fix_volta_endings(root.find("part")) == ([], [])
+    assert ET.tostring(root.find("part")) == before
+
+
+@pytest.mark.parametrize(
+    ("bodies", "measures", "reason"),
+    [
+        (
+            # Same number twice, but no repeat to say where ending 1 stops.
+            (
+                start("1") + stop("1", "discontinue"),
+                start("1") + stop("1"),
+                start("2") + stop("2"),
+            ),
+            ["2", "3"],
+            "ending 1 (measure 3) has the same number as the ending right before it",
+        ),
+        (
+            # The span after the repeat is numbered 3: ending 2 or a third ending?
+            (
+                start("1") + stop("1", "discontinue"),
+                start("2") + stop("2", repeat=True),
+                start("3") + stop("3"),
+            ),
+            ["2", "3"],
+            "ending 2 (measure 3) ends with the repeat although the ending before it has none",
+        ),
+        (
+            (start("1"), start("2") + stop("2")),
+            ["3"],
+            "ending 2 starts before ending 1 ends",
+        ),
+        ((start("1"),), ["2"], "ending 1 never ends"),
+    ],
+)
+def test_doubtful_endings_become_suspects(bodies, measures, reason):
+    root = volta_part(*bodies)
+    before = endings(root)
+    result = fix_instrument(root, INSTRUMENTS["bb-trumpet"])
+
+    assert endings(root) == before
+    assert result.rewrites == ()
+    assert [s.measure for s in result.suspects] == measures
+    assert all(s.reason == f"{reason}; left as is" for s in result.suspects)
+    assert result.marked == tuple(measures)
+    for number in measures:
+        m = root.find(f"part/measure[@number='{number}']")
+        assert m.findtext("direction/direction-type/rehearsal") == "?"

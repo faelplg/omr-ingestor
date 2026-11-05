@@ -16,7 +16,7 @@ from omr_ingestor.pipeline import PipelineSetupError, run_item, select_item
 from omr_ingestor.status import STAGE_NAMES, read_status, write_status
 from omr_ingestor.xsd import XSD_ENV_VAR
 from tests.fake_tools import make_tool
-from tests.test_fixup import omr_score
+from tests.test_fixup import omr_score, start, stop, volta_score
 from tests.test_mscx_check import mscx_xml, part_xml, style_xml
 
 pytestmark = pytest.mark.skipif(shutil.which("xmllint") is None, reason="xmllint not installed")
@@ -274,6 +274,30 @@ def test_rejected_rerun_keeps_the_previous_mscz(setup: Setup, monkeypatch):
     monkeypatch.setenv(MUSESCORE_ENV_VAR, str(fake_musescore(setup.bin, trumpet_mscx())))
     assert setup.run() == 0
     assert not rejected.exists()
+
+
+def test_volta_rewrites_and_suspects_reach_the_status(setup: Setup, monkeypatch):
+    xml = volta_score(
+        start("1") + stop("1", "discontinue"),
+        start("2"),
+        stop("2", repeat=True),
+        start("2") + stop("2"),
+        start("1") + stop("1", "discontinue"),
+        start("1") + stop("1"),
+        start("2") + stop("2"),
+    )
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [xml])))
+    assert setup.run() == 0
+
+    status = setup.status()
+    reason = "ending 1 (measure 7) has the same number as the ending right before it; left as is"
+    assert [(m.number, m.detail) for m in status.suspect_measures] == [
+        ("6", reason),
+        ("7", reason),
+    ]
+    assert status.stage("fixup").detail == (
+        "bb-trumpet applied to part P1, 3 mark(s); ending 1 rejoined over measures 2-4"
+    )
 
 
 def test_page_size_comes_from_the_style(setup: Setup):
