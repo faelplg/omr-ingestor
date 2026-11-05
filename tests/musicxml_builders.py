@@ -34,3 +34,21 @@ def score(parts: dict[str, list[str]], *, header: str = "", score_parts: str | N
         f'<score-partwise version="4.0">{header}<part-list>{score_parts}</part-list>'
         f"{body}</score-partwise>"
     )
+
+
+def barline(
+    location: str,
+    *,
+    ending: tuple[str, str] | None = None,
+    repeat: str | None = None,
+    end_length: str | None = None,
+) -> str:
+    """A <barline>; ending is (number, type), repeat is a direction."""
+    body = ""
+    if ending is not None:
+        number, kind = ending
+        length = f' end-length="{end_length}"' if end_length else ""
+        body += f'<ending number="{number}" type="{kind}"{length}/>'
+    if repeat is not None:
+        body += f'<repeat direction="{repeat}"/>'
+    return f'<barline location="{location}">{body}</barline>'
