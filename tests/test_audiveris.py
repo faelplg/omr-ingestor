@@ -38,9 +38,18 @@ def fake_audiveris(
     exit_code: int = 0,
     subfolder: bool = False,
     corrupt: bool = False,
+    print_version: bool = True,
+    encoding: str = "",
 ) -> Path:
     """A fake Audiveris that writes one .mxl per name ({stem} is the PDF stem)."""
-    plan = {"names": mxl_names, "exit": exit_code, "subfolder": subfolder, "corrupt": corrupt}
+    plan = {
+        "names": mxl_names,
+        "exit": exit_code,
+        "subfolder": subfolder,
+        "corrupt": corrupt,
+        "print_version": print_version,
+        "encoding": encoding,
+    }
     return make_tool(
         tmp_path / "bin",
         "Audiveris",
@@ -52,7 +61,8 @@ def fake_audiveris(
         Path(sys.argv[0]).with_suffix(".args").write_text(json.dumps(args))
         out = Path(args[args.index("-output") + 1])
         pdf = Path(args[args.index("--") + 1])
-        print("INFO  Audiveris version 5.11.0")
+        if plan["print_version"]:
+            print("INFO  Audiveris version 5.11.0")
         print("some error", file=sys.stderr)
         book = out / pdf.stem if plan["subfolder"] else out
         book.mkdir(parents=True, exist_ok=True)
@@ -64,7 +74,9 @@ def fake_audiveris(
                 continue
             with zipfile.ZipFile(book / name, "w") as zf:
                 zf.writestr("META-INF/container.xml", {CONTAINER!r}.format(root="score.xml"))
-                zf.writestr("score.xml", "<score-partwise>" + name + "</score-partwise>")
+                zf.writestr(
+                    "score.xml", "<score-partwise>" + plan["encoding"] + name + "</score-partwise>"
+                )
         sys.exit(plan["exit"])
         """,
     )
@@ -97,6 +109,19 @@ def test_single_movement(tmp_path: Path, pdf: Path):
     assert args[-2:] == ["--", str(pdf.resolve())]
     # Staging folders are gone.
     assert sorted(p.name for p in out.parent.iterdir()) == ["flute"]
+
+
+def test_version_comes_from_the_musicxml_signature(tmp_path: Path, pdf: Path):
+    # Audiveris 5.11 prints no version in batch mode; the export names it.
+    encoding = (
+        "<identification><encoding><software>Audiveris 5.11.0</software>"
+        "<software>ProxyMusic 4.0.3</software></encoding></identification>"
+    )
+    exe = fake_audiveris(tmp_path, ["{stem}.mxl"], print_version=False, encoding=encoding)
+    assert run_audiveris(pdf, tmp_path / "out", audiveris=exe).version == "5.11.0"
+
+    exe = fake_audiveris(tmp_path, ["{stem}.mxl"], print_version=False)
+    assert run_audiveris(pdf, tmp_path / "out", audiveris=exe).version is None
 
 
 def test_several_movements_in_subfolder_are_sorted_naturally(tmp_path: Path, pdf: Path):
