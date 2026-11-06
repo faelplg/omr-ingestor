@@ -64,13 +64,32 @@ def test_measure_count_records_missing_and_extra_measures():
     assert sample(measures_read=62).measure_count.missing == -2
 
 
-def test_reads_schema_version_1(tmp_path):
+@pytest.mark.parametrize("version", [1, 2])
+def test_reads_legacy_schema_versions_and_preserves_review(tmp_path, version):
     path = tmp_path / "status.json"
     data = sample().to_dict()
-    del data["measure_count"]
-    data["schema_version"] = 1
+    del data["audiveris_options"]
+    if version == 1:
+        del data["measure_count"]
+    data["schema_version"] = version
     path.write_text(json.dumps(data), encoding="utf-8")
-    assert read_status(path) == sample(measures_read=None)
+    expected = sample(audiveris_options=None, measures_read=None if version == 1 else 51)
+    assert read_status(path) == expected
+    write_status(read_status(path), path)
+    assert read_status(path) == expected
+    assert json.loads(path.read_text())["schema_version"] == 3
+
+
+def test_audiveris_options_round_trip(tmp_path):
+    options = {
+        "org.audiveris.omr.sheet.grid.StaffProjector.staffAbscissaMargin": "1.0",
+        "org.audiveris.omr.image.ImageLoading.pdfResolution": "600",
+    }
+    path = tmp_path / "status.json"
+    item = sample(audiveris_options=options)
+    write_status(item, path)
+    assert read_status(path) == item
+    assert list(json.loads(path.read_text())["audiveris_options"]) == sorted(options)
 
 
 def test_stable_key_order_and_bytes(tmp_path):
@@ -90,6 +109,7 @@ def test_stable_key_order_and_bytes(tmp_path):
         "hand_corrected",
         "acceptance",
         "tool_versions",
+        "audiveris_options",
     ]
     assert list(data["stages"][0]) == ["name", "status", "duration_s", "detail"]
     assert list(data["tool_versions"]) == ["audiveris", "musescore"]
@@ -164,7 +184,10 @@ def test_invalid_values_raise(make, message):
     ("edit", "message"),
     [
         (lambda d: d["acceptance"].update(accepted=False), "does not match"),
-        (lambda d: d.update(schema_version=3), "schema_version"),
+        (lambda d: d.update(schema_version=4), "schema_version"),
+        (lambda d: d.pop("audiveris_options"), "keys"),
+        (lambda d: d.update(audiveris_options=[]), "audiveris_options"),
+        (lambda d: d.update(audiveris_options={"constant": 600}), "audiveris_options"),
         (lambda d: d["measure_count"].update(missing=0), "measure_count"),
         (lambda d: d.update(measure_count=None, schema_version=1), "keys"),
         (lambda d: d.update(extra=1), "keys"),

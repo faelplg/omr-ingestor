@@ -82,8 +82,8 @@ def write_mscz(
     return path
 
 
-def mscz_for(tmp_path: Path, inst_id: str, **kwargs) -> Path:
-    """A .mscz as MuseScore 4.7.5 writes it for an instrument from instruments.json."""
+def instrument_mscx(inst_id: str) -> str:
+    """The .mscx MuseScore 4.7.5 writes for an instrument from instruments.json."""
     inst = INSTRUMENTS[inst_id]
     t = inst.transpose
     part = part_xml(
@@ -92,8 +92,12 @@ def mscz_for(tmp_path: Path, inst_id: str, **kwargs) -> Path:
         t.diatonic + 7 * t.octave_change,
         t.chromatic + 12 * t.octave_change,
     )
-    clef = {"G2": "G", "F4": "F"}[inst.clef]
-    return write_mscz(tmp_path / f"{inst_id}.mscz", mscx_xml(part, clef), **kwargs)
+    return mscx_xml(part, {"G2": "G", "F4": "F"}[inst.clef])
+
+
+def mscz_for(tmp_path: Path, inst_id: str, **kwargs) -> Path:
+    """A .mscz as MuseScore 4.7.5 writes it for an instrument from instruments.json."""
+    return write_mscz(tmp_path / f"{inst_id}.mscz", instrument_mscx(inst_id), **kwargs)
 
 
 def by_name(result) -> dict:

@@ -4,14 +4,48 @@ Local pipeline that takes a sheet-music PDF (one part, for one of 6 wind instrum
 
 ## Status
 
-**Skeleton, nothing implemented.** This repo only holds documentation, the instrument table and the manifest schema. No script runs yet.
+Every stage of `docs/architecture.md` is implemented, per item (`run`) and over a whole manifest (`batch`). The automated tests use fake Audiveris and MuseScore executables; what was measured with the real tools is listed in `docs/architecture.md`.
 
-## How it will run (planned)
+## How it runs
 
 - Runs on the author's Mac (arm64), from the command line.
 - Input: a `music.json` manifest (see `docs/music.schema.json` and `examples/music.example.json`) that lists the PDFs, the instrument of each one (provided at submission time, never guessed) and the expected number of measures.
 - Output: one `.mscz` per part plus a `status.json` per item, in `output/` (kept out of git).
 - Stages and decisions: `docs/architecture.md`.
+
+## Usage
+
+Install with `uv sync`. The tools come from environment variables: `OMR_AUDIVERIS`, `OMR_MUSESCORE` and `OMR_MUSICXML_XSD` (the local MusicXML 4.0 XSD); `xmllint` must be on the `PATH`.
+
+```sh
+uv run omr-ingestor validate music.json          # check the manifest
+uv run omr-ingestor run -o output music.json 0   # one item: index, pdf or pdf stem
+uv run omr-ingestor batch -o output music.json   # every item, then the cross-part check
+```
+
+### Audiveris settings per input
+
+An item can supply `audiveris_options`, a map of fully qualified constant names to scalar strings. Each entry becomes a separate `-option name=value` argument, recorded in the item's `audiveris/audiveris.log`. Names must start with `org.audiveris.omr.`; values allow letters, digits, `_`, `.`, `+` and `-`. Omitting the map keeps the installed Audiveris defaults. Options apply only to that item on both `run` and `batch`. Audiveris owns the constant names and their meanings; check its log for unsupported settings when changing tool versions.
+
+The effective override map is recorded next to `tool_versions` in `status.json` (schema 3) and each `batch.json` item (schema 2). An empty map means tool defaults were used. Older status schemas remain readable with unknown options represented as `null`; batch items that never started also record `null`.
+
+For a single-instrument page surrounded by a decorative frame:
+
+```json
+"audiveris_options": {
+  "org.audiveris.omr.sheet.grid.StaffProjector.staffAbscissaMargin": "1.0"
+}
+```
+
+[Audiveris 5.11's default projection margin](https://github.com/Audiveris/audiveris/blob/5.11.0/app/src/main/java/org/audiveris/omr/sheet/grid/StaffProjector.java) is 15 staff interlines. A nearby vertical frame can then be mistaken for a connector between successive systems. Reducing the margin to one interline excludes the frame on the Carnaval test pages, restoring independent systems, their barlines and the 2/4 signature. Do not apply this setting globally: other layouts can need a wider margin for braces or brackets. For small vector pages that still lose a barline, also test `org.audiveris.omr.image.ImageLoading.pdfResolution` with the string value `"600"`. Higher resolution alone does not correct the false system connections.
+
+### batch
+
+Runs every item of the manifest in order, exactly as `run` does, and writes each item's `output/<pdf stem>/status.json`. A failing item does not stop the others. Since all items are parts of the same piece, it then compares the measures read per part with each other and with each part's `expected_measures`.
+
+- `output/batch.json`: per item its stem, instrument, status (`passed`, `failed` or `setup_error`), measures read/expected/missing and suspect count; plus `cross_part`: whether all parts agree, the count most parts read, and which parts differ from the others or from their expected value.
+- stdout: one line per item as it finishes, then a summary table. Disagreements are printed as warnings on stderr.
+- Exit code: 0 only if every item passed. A measure-count disagreement is a warning, not a failure: the author fixes it by hand.
 
 ## PDFs never leave the Mac
 

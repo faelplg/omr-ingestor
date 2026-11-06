@@ -21,6 +21,29 @@ def test_example_manifest_is_valid():
 
 
 @pytest.mark.parametrize(
+    "options,valid",
+    [
+        ({}, True),
+        ({"org.audiveris.omr.sheet.grid.StaffProjector.staffAbscissaMargin": "1.0"}, True),
+        ({"org.audiveris.omr.image.ImageLoading.pdfResolution": "600"}, True),
+        ({"org.audiveris.omr.image.ImageLoading.pdfResolution": 600}, False),
+        ({"-run": "SomeClass"}, False),
+        ({"org.audiveris.omr.image.ImageLoading.pdfResolution": "600\nfoo=true"}, False),
+        ({"org.audiveris.omr.image.ImageLoading.pdfResolution": "600\n"}, False),
+        ({"org.audiveris.omr.image.ImageLoading.pdfResolution": "600\r\n"}, False),
+        ({"org.audiveris.omr.image.ImageLoading.pdfResolution\n": "600"}, False),
+        ({"org.audiveris.omr.image.ImageLoading.pdfResolution\r\n": "600"}, False),
+    ],
+)
+def test_audiveris_options_schema(example, options, valid):
+    example["items"][0]["audiveris_options"] = options
+    if valid:
+        validate_manifest(example)
+    else:
+        assert any("audiveris_options" in p for p in problems_of(example))
+
+
+@pytest.mark.parametrize(
     ("mutate", "expected"),
     [
         (lambda d: d.pop("style"), "<root>: 'style' is a required property"),

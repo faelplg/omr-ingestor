@@ -49,8 +49,8 @@ def trumpet_mscx(instrument_id: str = TRUMPET.id) -> str:
     return mscx_xml(part_xml(instrument_id, TRUMPET.name_pt, t.diatonic, t.chromatic))
 
 
-def fake_audiveris(bin_dir: Path, movements: list[str]) -> Path:
-    """Writes one .mxl per MusicXML text in movements."""
+def fake_audiveris(bin_dir: Path, movements: list[str] | dict[str, list[str]]) -> Path:
+    """Writes one .mxl per MusicXML text in movements (or in movements[pdf stem])."""
     return make_tool(
         bin_dir,
         "Audiveris",
@@ -62,6 +62,8 @@ def fake_audiveris(bin_dir: Path, movements: list[str]) -> Path:
         pdf = Path(args[args.index("--") + 1])
         print("Audiveris version 5.11.0")
         movements = {movements!r}
+        if isinstance(movements, dict):
+            movements = movements[pdf.stem]
         for i, text in enumerate(movements, 1):
             name = pdf.stem + (f".mvt{{i}}" if len(movements) > 1 else "") + ".mxl"
             with zipfile.ZipFile(out / name, "w") as zf:
@@ -71,8 +73,8 @@ def fake_audiveris(bin_dir: Path, movements: list[str]) -> Path:
     )
 
 
-def fake_musescore(bin_dir: Path, mscx: str) -> Path:
-    """Writes mscx plus the -S style, and snapshots status.json as it was when called."""
+def fake_musescore(bin_dir: Path, mscx: str | dict[str, str]) -> Path:
+    """Writes mscx (or mscx[pdf stem]) plus the -S style; snapshots status.json as it was."""
     return make_tool(
         bin_dir,
         "mscore",
@@ -88,8 +90,11 @@ def fake_musescore(bin_dir: Path, mscx: str) -> Path:
         out = Path(args[args.index("-o") + 1])
         style = Path(args[args.index("-S") + 1])
         shutil.copy(out.parent.parent / "status.json", here.with_suffix(".status.json"))
+        mscx = {mscx!r}
+        if isinstance(mscx, dict):
+            mscx = mscx[out.parent.parent.name]
         with zipfile.ZipFile(out, "w") as zf:
-            zf.writestr("score.mscx", {mscx!r})
+            zf.writestr("score.mscx", mscx)
             zf.writestr("score_style.mss", style.read_text())
         sys.exit(134)
         """,
@@ -164,6 +169,7 @@ def test_runs_every_stage(setup: Setup, capsys):
     assert [m.number for m in status.suspect_measures] == ["2"]
     assert status.hand_corrected is None
     assert status.tool_versions == {"audiveris": "5.11.0", "musescore": "4.7.5"}
+    assert status.audiveris_options == {}
     assert status.measure_count == MeasureCount(read=3, expected=3, missing=0)
     assert status.stage("durations").detail == (
         "1 suspect measure(s); 3 measure(s) read, 3 expected, 0 missing"
@@ -179,6 +185,48 @@ def test_runs_every_stage(setup: Setup, capsys):
     args = json.loads((setup.bin / "mscore.args").read_text())
     assert args[:2] == ["-S", str(setup.style.resolve())]
     assert "output:" in capsys.readouterr().out
+
+
+def test_manifest_options_reach_audiveris_without_leaking_to_later_runs(setup: Setup):
+    data = json.loads(setup.manifest.read_text())
+    option = "org.audiveris.omr.sheet.grid.StaffProjector.staffAbscissaMargin=1.0"
+    data["items"][0]["audiveris_options"] = dict([option.split("=", 1)])
+    setup.manifest.write_text(json.dumps(data))
+    assert setup.run() == 0
+    log = setup.item_dir / "audiveris" / "audiveris.log"
+    assert f"-option {option}" in log.read_text()
+    assert setup.status().audiveris_options == data["items"][0]["audiveris_options"]
+    seen = read_status(setup.bin / "mscore.status.json")
+    assert seen.audiveris_options == setup.status().audiveris_options
+
+    del data["items"][0]["audiveris_options"]
+    setup.manifest.write_text(json.dumps(data))
+    assert setup.run() == 0
+    assert "-option" not in log.read_text()
+    assert setup.status().audiveris_options == {}
+
+
+@pytest.mark.parametrize("location", ["name", "value"])
+@pytest.mark.parametrize("ending", ["\n", "\r\n"])
+def test_option_newlines_fail_manifest_validation_before_setup(
+    setup: Setup, monkeypatch, capsys, location, ending
+):
+    data = json.loads(setup.manifest.read_text())
+    name, value = "org.audiveris.omr.image.ImageLoading.pdfResolution", "600"
+    if location == "name":
+        name += ending
+    else:
+        value += ending
+    data["items"][0]["audiveris_options"] = {name: value}
+    setup.manifest.write_text(json.dumps(data))
+
+    def unexpected_setup():
+        pytest.fail("tool setup must not run for an invalid manifest")
+
+    monkeypatch.setattr("omr_ingestor.pipeline.resolve_tools", unexpected_setup)
+    assert setup.run() == 1
+    assert "invalid manifest" in capsys.readouterr().err
+    assert not setup.output.exists()
 
 
 def test_status_is_written_after_each_stage(setup: Setup):

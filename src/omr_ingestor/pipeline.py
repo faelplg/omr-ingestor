@@ -68,6 +68,14 @@ class PipelineSetupError(Exception):
     """The item cannot start: bad manifest or selector, missing tool, file or checksum."""
 
 
+class PipelineIOError(OSError):
+    """I/O failed after this invocation successfully wrote its initial status."""
+
+    def __init__(self, message: str, *, status_file: Path) -> None:
+        super().__init__(message)
+        self.status_file = status_file
+
+
 class StageError(Exception):
     """A stage ran but its result is not acceptable."""
 
@@ -236,7 +244,12 @@ class _Context:
 
 
 def _audiveris(ctx: _Context) -> str:
-    result = run_audiveris(ctx.pdf, ctx.paths.audiveris_dir, audiveris=ctx.tools.audiveris)
+    result = run_audiveris(
+        ctx.pdf,
+        ctx.paths.audiveris_dir,
+        audiveris=ctx.tools.audiveris,
+        options=ctx.status.audiveris_options,
+    )
     ctx.set_version("audiveris", result.version)
     files = result.musicxml_files
     if len(files) != 1:
@@ -365,6 +378,7 @@ def _prepare(manifest_path: Path, selector: str, output_dir: Path) -> _Context:
         expected_measures=item["expected_measures"],
         stages=tuple(Stage(name, StageState.PENDING) for name in STAGE_NAMES),
         hand_corrected=previous.hand_corrected if previous else None,
+        audiveris_options=dict(item.get("audiveris_options", {})),
     )
     return _Context(
         tools=tools,
@@ -382,6 +396,13 @@ def run_item(manifest_path: Path, selector: str, output_dir: Path) -> RunResult:
     ctx = _prepare(Path(manifest_path), selector, Path(output_dir))
     ctx.paths.item_dir.mkdir(parents=True, exist_ok=True)
     ctx.save()
+    try:
+        return _run_stages(ctx)
+    except OSError as exc:
+        raise PipelineIOError(str(exc), status_file=ctx.paths.status) from exc
+
+
+def _run_stages(ctx: _Context) -> RunResult:
     for i, (name, stage) in enumerate(_STAGES):
         start = time.monotonic()
         try:
