@@ -52,3 +52,9 @@ def barline(
     if repeat is not None:
         body += f'<repeat direction="{repeat}"/>'
     return f'<barline location="{location}">{body}</barline>'
+
+
+def multiple_rest(bars: int | str) -> str:
+    """An <attributes> that starts a multi-measure rest of this many bars."""
+    style = f"<measure-style><multiple-rest>{bars}</multiple-rest></measure-style>"
+    return f"<attributes>{style}</attributes>"

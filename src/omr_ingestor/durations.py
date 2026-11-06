@@ -4,6 +4,10 @@ Durations are compared in quarter notes, as Fractions, so changes of <divisions>
 (even in the middle of a measure) do not matter. The length of a measure is the
 furthest point the cursor reaches, so chords, <backup> and <forward> (several
 voices or staves) are handled the way a MusicXML reader places notes in time.
+
+A measure that starts a multi-measure rest (<multiple-rest>) is suspect too, whatever
+its duration: Audiveris reads every multi-measure rest as one bar, so the part loses
+measures there. The length is reported as read, never guessed.
 """
 
 import xml.etree.ElementTree as ET
@@ -31,6 +35,7 @@ class MeasureDuration:
     time: TimeSignature | None  # None under senza-misura
     partial: bool = False  # accepted as shorter: pickup, implicit, or closing the pickup
     problems: tuple[str, ...] = ()
+    multiple_rest: int | None = None  # bars of the <multiple-rest> that starts here, as read
 
     @property
     def expected(self) -> Fraction | None:
@@ -46,11 +51,23 @@ class MeasureDuration:
             return 0 < self.actual < self.time.quarters
         return self.actual == self.time.quarters
 
+    @property
+    def suspect(self) -> bool:
+        """The duration does not add up, or a multi-measure rest starts here."""
+        return not self.ok or self.multiple_rest is not None
+
     def describe(self) -> str:
-        where = f"part {self.part_id} measure {self.number}"
-        if self.problems:
-            return f"{where}: " + "; ".join(self.problems)
-        return f"{where}: {self.actual} quarter(s), expected {self.expected} ({self.time.text})"
+        """Every reason this measure is suspect, joined; the duration alone when it is not."""
+        reasons = list(self.problems)
+        if not reasons and (not self.ok or self.multiple_rest is None):
+            time = self.time.text if self.time else "senza misura"
+            reasons.append(f"{self.actual} quarter(s), expected {self.expected} ({time})")
+        if self.multiple_rest is not None:
+            reasons.append(
+                f"multi-measure rest read as {self.multiple_rest} bar(s); "
+                "check the real length in the PDF"
+            )
+        return f"part {self.part_id} measure {self.number}: " + "; ".join(reasons)
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,7 +76,7 @@ class DurationReport:
 
     @property
     def suspects(self) -> list[MeasureDuration]:
-        return [m for m in self.measures if not m.ok]
+        return [m for m in self.measures if m.suspect]
 
     def suspect_numbers(self, part_id: str) -> list[str]:
         """Measure numbers of the suspect measures of one part, ready for fix_instrument."""
@@ -99,6 +116,14 @@ def _time_signature(time_el: ET.Element, where: str) -> TimeSignature | None:
     return TimeSignature("+".join(parts), total)
 
 
+def _multiple_rest(el: ET.Element, where: str) -> int:
+    text = (el.text or "").strip()
+    try:
+        return int(text)
+    except ValueError:
+        raise MusicXMLError(f"{where}: <multiple-rest> {text!r} is not a whole number") from None
+
+
 def _is_measure_rest(note: ET.Element) -> bool:
     rest = note.find("rest")
     return rest is not None and rest.get("measure") == "yes"
@@ -119,6 +144,7 @@ def check_part(part: ET.Element) -> list[MeasureDuration]:
         pos = end = chord_start = Fraction(0)
         notes = 0
         measure_rests = 0
+        multiple_rest: int | None = None
 
         for el in measure:
             if el.tag == "attributes":
@@ -128,6 +154,8 @@ def check_part(part: ET.Element) -> list[MeasureDuration]:
                         raise MusicXMLError(f"{where}: <divisions> is zero")
                 if (time_el := el.find("time")) is not None:
                     time, time_seen = _time_signature(time_el, where), True
+                if (multi := el.find("measure-style/multiple-rest")) is not None:
+                    multiple_rest = _multiple_rest(multi, where)
                 continue
             if el.tag not in ("note", "backup", "forward"):
                 continue
@@ -164,7 +192,11 @@ def check_part(part: ET.Element) -> list[MeasureDuration]:
         if time is not None and notes and measure_rests == notes:
             end = time.quarters
 
-        results.append(MeasureDuration(part_id, number, index, end, time, False, tuple(problems)))
+        results.append(
+            MeasureDuration(
+                part_id, number, index, end, time, False, tuple(problems), multiple_rest
+            )
+        )
 
     return [_mark_partial(results, measures, i) for i in range(len(results))]
 

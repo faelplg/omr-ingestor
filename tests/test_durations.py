@@ -4,7 +4,7 @@ import pytest
 
 from omr_ingestor.durations import check_durations, measure_durations
 from omr_ingestor.musicxml import MusicXMLError, parse_musicxml
-from tests.musicxml_builders import DEFAULT_ATTRS, measure, note, rest, score
+from tests.musicxml_builders import DEFAULT_ATTRS, measure, multiple_rest, note, rest, score
 
 Q = note(1)
 
@@ -161,6 +161,46 @@ def test_suspects_are_reported_per_part():
     report = check_durations(parse_musicxml(xml))
     assert report.suspect_numbers("P1") == ["2"]
     assert report.suspect_numbers("P2") == []
+
+
+MULTI_REST_REASON = "multi-measure rest read as {} bar(s); check the real length in the PDF"
+
+
+def test_multi_measure_rests_are_suspect_whatever_their_length():
+    whole = rest(4, measure=True)
+    report = check(
+        measure(1, DEFAULT_ATTRS + Q * 4),
+        measure(2, multiple_rest(1) + whole),
+        measure(3, Q * 4),
+        measure(4, multiple_rest(4) + whole),
+        measure(5, Q * 4),
+    )
+    assert [m.number for m in report.suspects] == ["2", "4"]
+    assert [m.multiple_rest for m in report.suspects] == [1, 4]
+    assert report.suspects[0].ok
+    assert report.suspects[0].describe() == f"part P1 measure 2: {MULTI_REST_REASON.format(1)}"
+    assert report.suspect_numbers("P1") == ["2", "4"]
+
+
+def test_multi_measure_rest_on_a_bad_measure_merges_the_reasons():
+    report = check(measure(1, DEFAULT_ATTRS + Q * 4), measure(2, multiple_rest(1) + Q * 3))
+    [m] = report.suspects
+    assert m.describe() == (
+        f"part P1 measure 2: 3 quarter(s), expected 4 (4/4); {MULTI_REST_REASON.format(1)}"
+    )
+
+
+def test_part_without_multi_measure_rests_gets_no_new_suspects():
+    xml = score(
+        {
+            "P1": [measure(1, DEFAULT_ATTRS + Q * 4), measure(2, multiple_rest(2) + rest(4))],
+            "P2": [measure(1, DEFAULT_ATTRS + Q * 4), measure(2, rest(4, measure=True))],
+        }
+    )
+    report = check_durations(parse_musicxml(xml))
+    assert report.suspect_numbers("P1") == ["2"]
+    assert report.suspect_numbers("P2") == []
+    assert all(m.multiple_rest is None for m in report.measures if m.part_id == "P2")
 
 
 @pytest.mark.parametrize(

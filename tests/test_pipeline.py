@@ -16,6 +16,7 @@ from omr_ingestor.pipeline import PipelineSetupError, run_item, select_item
 from omr_ingestor.status import STAGE_NAMES, read_status, write_status
 from omr_ingestor.xsd import XSD_ENV_VAR
 from tests.fake_tools import make_tool
+from tests.musicxml_builders import DEFAULT_ATTRS, measure, multiple_rest, note, rest, score
 from tests.test_fixup import omr_score, start, stop, volta_score
 from tests.test_mscx_check import mscx_xml, part_xml, style_xml
 
@@ -298,6 +299,33 @@ def test_volta_rewrites_and_suspects_reach_the_status(setup: Setup, monkeypatch)
     assert status.stage("fixup").detail == (
         "bb-trumpet applied to part P1, 3 mark(s); ending 1 rejoined over measures 2-4"
     )
+
+
+def test_multi_measure_rests_are_marked_for_review(setup: Setup, monkeypatch):
+    q, whole = note(1), rest(4, measure=True)
+    xml = score(
+        {
+            "P1": [
+                measure(1, DEFAULT_ATTRS + q * 4),
+                measure(2, multiple_rest(1) + whole),
+                measure(3, multiple_rest(1) + q * 3),
+            ]
+        }
+    )
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [xml])))
+    assert setup.run() == 0
+
+    reason = "multi-measure rest read as 1 bar(s); check the real length in the PDF"
+    assert [(m.number, m.detail) for m in setup.status().suspect_measures] == [
+        ("2", f"part P1 measure 2: {reason}"),
+        ("3", f"part P1 measure 3: 3 quarter(s), expected 4 (4/4); {reason}"),
+    ]
+    fixed = read_musicxml(setup.item_dir / f"{STEM}.musicxml")
+    for number in ("2", "3"):
+        marks = fixed.findall(
+            f"part/measure[@number='{number}']/direction/direction-type/rehearsal"
+        )
+        assert [m.text for m in marks] == ["?"]
 
 
 def test_page_size_comes_from_the_style(setup: Setup):
