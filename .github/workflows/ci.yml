@@ -25,4 +25,6 @@ jobs:
           python-version: "3.12"
       - run: uv sync --locked
       - run: uv run ruff check .
+      - name: Install xmllint
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libxml2-utils
       - run: uv run pytest -q
