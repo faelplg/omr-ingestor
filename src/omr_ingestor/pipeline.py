@@ -36,7 +36,7 @@ from omr_ingestor.instruments import Instrument, InstrumentsError, load_instrume
 from omr_ingestor.manifest import ManifestError, load_manifest
 from omr_ingestor.mscx_check import A5_LANDSCAPE, MM_PER_INCH, MscxCheckError, PageSize
 from omr_ingestor.musescore import MuseScoreError, resolve_musescore
-from omr_ingestor.musicxml import MusicXMLError, find_part, read_musicxml, write_musicxml
+from omr_ingestor.musicxml import MusicXMLError, part_ids, read_musicxml, write_musicxml
 from omr_ingestor.status import (
     STAGE_NAMES,
     ItemStatus,
@@ -273,22 +273,26 @@ def _durations(ctx: _Context) -> str:
     ctx.report = report
     suspects = report.suspects
     counts = [len(part.findall("measure")) for part in root.findall("part")]
-    # Several parts have no single measure count to record.
+    # A shared count lets batch compare multipart items with the rest of the piece.
     ctx.status = replace(
         ctx.status,
         suspect_measures=tuple(SuspectMeasure(m.number, m.describe()) for m in suspects),
-        measures_read=counts[0] if len(counts) == 1 else None,
+        measures_read=counts[0]
+        if len(counts) == 1 or (ctx.parts is not None and len(set(counts)) == 1)
+        else None,
     )
     expected = ctx.status.expected_measures
     read = "/".join(map(str, counts)) or "0"
     if ctx.parts is not None:
-        read = (
-            ", ".join(
-                f"part {p.get('id', '')}: {c}"
-                for p, c in zip(root.findall("part"), counts, strict=True)
+        details = []
+        for part, count in zip(root.findall("part"), counts, strict=True):
+            missing = expected - count
+            difference = f"{missing} missing" if missing >= 0 else f"{-missing} extra"
+            details.append(
+                f"part {part.get('id', '')}: {count} measure(s) read, "
+                f"{expected} expected, {difference}"
             )
-            or "0"
-        )
+        return "; ".join([f"{len(suspects)} suspect measure(s)", *details])
     detail = f"{len(suspects)} suspect measure(s); {read} measure(s) read, {expected} expected"
     if (count := ctx.status.measure_count) is not None:
         if count.missing >= 0:
@@ -303,7 +307,12 @@ def _durations(ctx: _Context) -> str:
 def _fixup(ctx: _Context) -> str:
     root = read_musicxml(ctx.raw_musicxml)
     if ctx.parts is None:
-        parts = [find_part(root, None)]
+        parts = root.findall("part")
+        if len(parts) != 1:
+            raise StageError(
+                f"score has {len(parts)} parts {part_ids(root)}; "
+                'list their names in the item\'s "parts"'
+            )
         names = [None]
     else:
         parts = root.findall("part")

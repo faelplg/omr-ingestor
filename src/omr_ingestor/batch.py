@@ -71,7 +71,8 @@ class CrossPartCheck:
     reference_count: int | None
     differ_from_others: tuple[str, ...]  # stems; every counted part when there is a tie
     differ_from_expected: tuple[str, ...]  # stems whose count is not their expected_measures
-    not_counted: tuple[str, ...]  # stems with no measure count (failed before durations)
+    # Stems with unavailable durations or differing counts within a multipart item.
+    not_counted: tuple[str, ...]
     expected_agree: bool  # the manifest gives every part the same expected_measures
 
 

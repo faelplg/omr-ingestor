@@ -486,10 +486,11 @@ def test_two_parts_fixup_and_final_check(setup, monkeypatch):
     mark = "part[@id='P2']/measure[@number='2']/direction/direction-type/rehearsal"
     assert fixed.findtext(mark) == "?"
     status = setup.status()
-    assert status.measures_read is None
+    assert status.measure_count == MeasureCount(read=2, expected=3, missing=1)
     assert len(status.suspect_measures) == 1
     assert status.suspect_measures[0].detail.startswith("part P2 measure 2:")
-    assert "part P1: 2, part P2: 2" in status.stage("durations").detail
+    assert "part P1: 2 measure(s) read, 3 expected, 1 missing" in status.stage("durations").detail
+    assert "part P2: 2 measure(s) read, 3 expected, 1 missing" in status.stage("durations").detail
     assert "part_count: pass (found 2, expected 2)" in status.stage("mscx_check").detail
     assert all(state == "passed" for state in states(status).values())
 
@@ -504,5 +505,47 @@ def test_multipart_count_mismatch_fails_before_writing(setup, monkeypatch, parts
     assert "score has 2 parts" in status.stage("fixup").detail
     if parts is not None:
         assert f"manifest parts expects {len(parts)}" in status.stage("fixup").detail
+    else:
+        assert status.stage("fixup").detail == (
+            "score has 2 parts ['P1', 'P2']; list their names in the item's \"parts\""
+        )
     assert status.stage("musescore").status.value == "skipped"
     assert not (setup.item_dir / f"{STEM}.musicxml").exists()
+
+
+@pytest.mark.parametrize("second_count", [1, 2, 4])
+def test_multipart_measure_counts_and_batch_summary(setup, monkeypatch, second_count, capsys):
+    configure_parts(setup, ["Trumpet 1", "Trumpet 2"])
+    xml = score(
+        {
+            pid: [
+                measure(n, (DEFAULT_ATTRS if n == 1 else "") + note(4)) for n in range(1, count + 1)
+            ]
+            for pid, count in (("P1", 2), ("P2", second_count))
+        }
+    )
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [xml])))
+    monkeypatch.setenv(MUSESCORE_ENV_VAR, str(fake_musescore(setup.bin, two_trumpet_mscx())))
+    assert main(["batch", "-o", str(setup.output), str(setup.manifest)]) == 0
+    status = setup.status()
+    delta = 3 - second_count
+    difference = f"{delta} missing" if delta >= 0 else f"{-delta} extra"
+    assert status.stage("durations").detail == (
+        "0 suspect measure(s); part P1: 2 measure(s) read, 3 expected, 1 missing; "
+        f"part P2: {second_count} measure(s) read, 3 expected, {difference}"
+    )
+    summary = json.loads((setup.output / "batch.json").read_text())
+    cross = summary["cross_part"]
+    warnings = capsys.readouterr().err
+    if second_count == 2:
+        assert status.measure_count == MeasureCount(read=2, expected=3, missing=1)
+        assert summary["items"][0]["measures"] == {"read": 2, "expected": 3, "missing": 1}
+        assert cross["not_counted"] == []
+        assert cross["differ_from_expected"] == [STEM]
+        assert cross["reference_count"] == 2
+        assert "warning:" in warnings
+        assert "expected" in warnings
+    else:
+        assert status.measures_read is None
+        assert cross["not_counted"] == [STEM]
+        assert f"warning: no common measure count: {STEM}" in warnings

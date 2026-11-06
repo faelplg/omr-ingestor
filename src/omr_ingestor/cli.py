@@ -88,7 +88,7 @@ def _print_batch(result: BatchResult) -> None:
         print(f"warning: measure count differs from expected_measures: {listed}", file=sys.stderr)
     if check.not_counted:
         listed = ", ".join(check.not_counted)
-        print(f"warning: measures not counted (failed before durations): {listed}", file=sys.stderr)
+        print(f"warning: no common measure count: {listed}", file=sys.stderr)
     if not check.expected_agree:
         listed = ", ".join(f"{s} {n}" for s, n in expected.items())
         print(f"warning: the manifest expects different measure counts: {listed}", file=sys.stderr)

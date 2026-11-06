@@ -33,9 +33,13 @@ configured display name. Each part must have one staff. Omitting `parts` keeps t
 single-part behavior and the instrument's default name.
 
 `expected_measures` applies to each part. Duration details and suspects identify
-part IDs; multipart items have no single `measures_read` value in status or batch
-summaries. The final MuseScore check verifies every configured part's name,
-instrument, transposition and clef. One `.mscz` contains all parts.
+part IDs and report missing or extra measures for each part without failing the run.
+When all parts have the same count, that count is recorded as `measures_read` in
+status and `measures.read` in the batch summary, and included in the batch cross-part
+comparison. If counts differ, these fields are `null` and batch lists the item as
+`not_counted`; consult the durations detail for each count. The final MuseScore
+check verifies every configured part's name, instrument, transposition and clef.
+One `.mscz` contains all parts.
 
 ### Audiveris settings per input
 
