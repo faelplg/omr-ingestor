@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from omr_ingestor.manifest import ManifestError, load_manifest
-from omr_ingestor.pipeline import ItemPaths, PipelineSetupError, run_item
+from omr_ingestor.pipeline import PipelineIOError, PipelineSetupError, run_item
 from omr_ingestor.status import MeasureCount, StageState, write_text_atomic
 
 BATCH_NAME = "batch.json"
@@ -113,18 +113,16 @@ def _run_one(manifest_path: Path, index: int, entry: dict[str, Any], output_dir:
     item = BatchItem(entry["pdf"], entry["instrument"], entry["expected_measures"], SETUP_ERROR)
     try:
         result = run_item(manifest_path, str(index), output_dir)
-    except PipelineSetupError as exc:
-        return replace(item, error=str(exc))
-    except OSError as exc:
-        status_file = ItemPaths.for_item(output_dir, entry["pdf"]).status
-        started = status_file.is_file()
+    except PipelineIOError as exc:
         return replace(
             item,
-            status=FAILED if started else SETUP_ERROR,
+            status=FAILED,
             error=str(exc),
-            status_file=status_file if started else None,
-            audiveris_options=dict(entry.get("audiveris_options", {})) if started else None,
+            status_file=exc.status_file,
+            audiveris_options=dict(entry.get("audiveris_options", {})),
         )
+    except (PipelineSetupError, OSError) as exc:
+        return replace(item, error=str(exc))
     status = result.status
     failed = result.failed_stage
     durations = status.stage("durations")

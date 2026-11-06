@@ -199,6 +199,73 @@ def test_item_status_write_error_does_not_abort_batch(batch: Batch, monkeypatch,
     assert batch.summary()["passed"] is False
 
 
+@pytest.mark.parametrize("failure", ["input-read", "initial-status-write"])
+def test_rerun_io_error_before_first_write_does_not_use_stale_status(
+    batch: Batch, monkeypatch, failure
+):
+    assert batch.run() == 0
+    status_file = batch.output / "song-trumpet/status.json"
+    previous = status_file.read_bytes()
+    assert all(s.status == "passed" for s in read_status(status_file).stages)
+
+    if failure == "input-read":
+        sha256_of = pipeline.sha256_of
+
+        def fail_input_read(path):
+            if path.stem == "song-trumpet":
+                raise PermissionError("input read denied")
+            return sha256_of(path)
+
+        monkeypatch.setattr(pipeline, "sha256_of", fail_input_read)
+        message = "input read denied"
+    else:
+        write_status = pipeline.write_status
+
+        def fail_initial_write(status, path):
+            if path == status_file:
+                raise PermissionError("initial status write denied")
+            write_status(status, path)
+
+        monkeypatch.setattr(pipeline, "write_status", fail_initial_write)
+        message = "initial status write denied"
+
+    assert batch.run() == 1
+    items = batch.items()
+    assert items["song-trumpet"]["status"] == "setup_error"
+    assert items["song-trumpet"]["status_file"] is None
+    assert items["song-trumpet"]["audiveris_options"] is None
+    assert items["song-trumpet"]["error"] == message
+    assert status_file.read_bytes() == previous
+    assert items["song-trombone"]["status"] == PASSED
+    assert items["song-flute"]["status"] == PASSED
+
+
+def test_io_error_recovery_does_not_probe_status_file(batch: Batch, monkeypatch):
+    status_file = batch.output / "song-trumpet/status.json"
+    is_file = Path.is_file
+    write_status = pipeline.write_status
+
+    def deny_status_probe(path, *args, **kwargs):
+        if path == status_file:
+            raise PermissionError("status probe denied")
+        return is_file(path, *args, **kwargs)
+
+    def fail_initial_write(status, path):
+        if path == status_file:
+            raise PermissionError("initial status write denied")
+        write_status(status, path)
+
+    monkeypatch.setattr(Path, "is_file", deny_status_probe)
+    monkeypatch.setattr(pipeline, "write_status", fail_initial_write)
+    assert batch.run() == 1
+    items = batch.items()
+    assert items["song-trumpet"]["status"] == "setup_error"
+    assert items["song-trumpet"]["status_file"] is None
+    assert items["song-trumpet"]["error"] == "initial status write denied"
+    assert items["song-trombone"]["status"] == PASSED
+    assert items["song-flute"]["status"] == PASSED
+
+
 def test_batch_records_each_items_options_on_success_failure_and_setup_error(batch: Batch):
     options = {"org.audiveris.omr.sheet.grid.StaffProjector.staffAbscissaMargin": "1.0"}
     data = json.loads(batch.manifest.read_text())

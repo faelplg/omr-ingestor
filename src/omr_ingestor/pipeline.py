@@ -68,6 +68,14 @@ class PipelineSetupError(Exception):
     """The item cannot start: bad manifest or selector, missing tool, file or checksum."""
 
 
+class PipelineIOError(OSError):
+    """I/O failed after this invocation successfully wrote its initial status."""
+
+    def __init__(self, message: str, *, status_file: Path) -> None:
+        super().__init__(message)
+        self.status_file = status_file
+
+
 class StageError(Exception):
     """A stage ran but its result is not acceptable."""
 
@@ -388,6 +396,13 @@ def run_item(manifest_path: Path, selector: str, output_dir: Path) -> RunResult:
     ctx = _prepare(Path(manifest_path), selector, Path(output_dir))
     ctx.paths.item_dir.mkdir(parents=True, exist_ok=True)
     ctx.save()
+    try:
+        return _run_stages(ctx)
+    except OSError as exc:
+        raise PipelineIOError(str(exc), status_file=ctx.paths.status) from exc
+
+
+def _run_stages(ctx: _Context) -> RunResult:
     for i, (name, stage) in enumerate(_STAGES):
         start = time.monotonic()
         try:
