@@ -17,6 +17,7 @@ import tempfile
 import time
 import xml.etree.ElementTree as ET
 import zipfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,6 +30,8 @@ _CONTAINER = "META-INF/container.xml"
 _MUSICXML_MEDIA_TYPE = "application/vnd.recordare.musicxml+xml"
 _VERSION_RE = re.compile(r"Audiveris\D{0,20}?(\d+\.\d+(?:\.\d+)?)", re.IGNORECASE)
 _SOFTWARE_RE = re.compile(r"Audiveris\s+(\d+\.\d+(?:\.\d+)?\S*)", re.IGNORECASE)
+OPTION_NAME_PATTERN = r"^org\.audiveris\.omr\.(?:[A-Za-z][A-Za-z0-9]*\.)+[A-Za-z][A-Za-z0-9]*$"
+OPTION_VALUE_PATTERN = r"^[A-Za-z0-9_.+-]+$"
 
 
 class AudiverisError(Exception):
@@ -169,13 +172,25 @@ def run_audiveris(
     *,
     audiveris: str | Path | None = None,
     timeout: float = 1800,
+    options: Mapping[str, str] | None = None,
 ) -> AudiverisResult:
     """Run `Audiveris -batch -export -output <dir> -- <pdf>` and unzip every .mxl produced.
 
     output_dir is the per-item folder. It is created, or replaced when a previous run of
     this function created it. Raises AudiverisError when zero .mxl files are produced,
     whatever the exit code.
+
+    options maps fully qualified Audiveris constant names to scalar string values.
+    Each override is a separate -option argument and is recorded in audiveris.log.
+    Omitted options preserve the installed tool's defaults.
     """
+    option_args = []
+    for key, value in sorted((options or {}).items()):
+        if not re.fullmatch(OPTION_NAME_PATTERN, key) or not re.fullmatch(
+            OPTION_VALUE_PATTERN, value
+        ):
+            raise AudiverisError(f"invalid Audiveris constant option: {key!r}={value!r}")
+        option_args.extend(["-option", f"{key}={value}"])
     pdf = Path(pdf)
     output_dir = Path(output_dir)
     if not pdf.is_file():
@@ -186,7 +201,16 @@ def run_audiveris(
 
     staging = Path(tempfile.mkdtemp(prefix=f".{output_dir.name}.tmp-", dir=output_dir.parent))
     try:
-        cmd = [str(exe), "-batch", "-export", "-output", str(staging), "--", str(pdf.resolve())]
+        cmd = [
+            str(exe),
+            "-batch",
+            "-export",
+            "-output",
+            str(staging),
+            *option_args,
+            "--",
+            str(pdf.resolve()),
+        ]
         start = time.monotonic()
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)

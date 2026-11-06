@@ -106,9 +106,38 @@ def test_single_movement(tmp_path: Path, pdf: Path):
     assert result.log_path == out / LOG_NAME
     args = json.loads(exe.with_suffix(".args").read_text())
     assert args[:3] == ["-batch", "-export", "-output"]
+    assert args[4:-2] == []
     assert args[-2:] == ["--", str(pdf.resolve())]
     # Staging folders are gone.
     assert sorted(p.name for p in out.parent.iterdir()) == ["flute"]
+
+
+def test_constant_options_are_separate_arguments_and_logged(tmp_path: Path, pdf: Path):
+    exe = fake_audiveris(tmp_path, ["{stem}.mxl"])
+    options = {
+        "org.audiveris.omr.sheet.grid.StaffProjector.staffAbscissaMargin": "1.0",
+        "org.audiveris.omr.image.ImageLoading.pdfResolution": "600",
+    }
+    result = run_audiveris(pdf, tmp_path / "out", audiveris=exe, options=options)
+    args = json.loads(exe.with_suffix(".args").read_text())
+    assert args[4:-2] == [
+        "-option", "org.audiveris.omr.image.ImageLoading.pdfResolution=600",
+        "-option", "org.audiveris.omr.sheet.grid.StaffProjector.staffAbscissaMargin=1.0",
+    ]
+    for key, value in options.items():
+        assert f"{key}={value}" in result.log_path.read_text()
+
+
+@pytest.mark.parametrize("options", [
+    {"-run": "SomeClass"},
+    {"org.audiveris.omr.image.ImageLoading.pdfResolution": "600\nother=true"},
+    {"org.audiveris.omr.image.ImageLoading.pdfResolution": r"600\nother=true"},
+])
+def test_invalid_constant_options_fail_before_output_creation(tmp_path: Path, pdf: Path, options):
+    out = tmp_path / "out"
+    with pytest.raises(AudiverisError, match="invalid Audiveris constant"):
+        run_audiveris(pdf, out, audiveris=tmp_path / "missing", options=options)
+    assert not out.exists()
 
 
 def test_version_comes_from_the_musicxml_signature(tmp_path: Path, pdf: Path):

@@ -19,6 +19,12 @@
           "pdf": {"type": "string", "minLength": 1},
           "instrument": {"enum": ["bb-trumpet", "trombone", "flute", "alto-saxophone", "tenor-saxophone", "tuba"]},
           "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "audiveris_options": {
+            "type": "object",
+            "description": "Per-item Audiveris -option constant overrides; omitted means unchanged tool defaults",
+            "propertyNames": {"pattern": "^org\\.audiveris\\.omr\\.(?:[A-Za-z][A-Za-z0-9]*\\.)+[A-Za-z][A-Za-z0-9]*$"},
+            "additionalProperties": {"type": "string", "pattern": "^[A-Za-z0-9_.+-]+$"}
+          },
           "expected_measures": {"type": "integer", "minimum": 1, "description": "Denominator of the up-to-5% hand-corrected criterion"}
         }
       }

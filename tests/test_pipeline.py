@@ -186,6 +186,21 @@ def test_runs_every_stage(setup: Setup, capsys):
     assert "output:" in capsys.readouterr().out
 
 
+def test_manifest_options_reach_audiveris_without_leaking_to_later_runs(setup: Setup):
+    data = json.loads(setup.manifest.read_text())
+    option = "org.audiveris.omr.sheet.grid.StaffProjector.staffAbscissaMargin=1.0"
+    data["items"][0]["audiveris_options"] = dict([option.split("=", 1)])
+    setup.manifest.write_text(json.dumps(data))
+    assert setup.run() == 0
+    log = setup.item_dir / "audiveris" / "audiveris.log"
+    assert f"-option {option}" in log.read_text()
+
+    del data["items"][0]["audiveris_options"]
+    setup.manifest.write_text(json.dumps(data))
+    assert setup.run() == 0
+    assert "-option" not in log.read_text()
+
+
 def test_status_is_written_after_each_stage(setup: Setup):
     assert setup.run() == 0
     # The copy MuseScore saw: everything before it passed, the rest still pending.

@@ -23,6 +23,34 @@ uv run omr-ingestor run -o output music.json 0   # one item: index, pdf or pdf s
 uv run omr-ingestor batch -o output music.json   # every item, then the cross-part check
 ```
 
+### Audiveris settings per input
+
+An item can supply `audiveris_options`, a map of fully qualified constant names to
+scalar strings. Each entry becomes a separate `-option name=value` argument, recorded
+in the item's `audiveris/audiveris.log`. Names must start with `org.audiveris.omr.`;
+values allow letters, digits, `_`, `.`, `+` and `-`. Omitting the map keeps the
+installed Audiveris defaults. Options apply only to that item on both `run` and `batch`.
+Audiveris owns the constant names and their meanings; check its log for unsupported
+settings when changing tool versions.
+
+For a single-instrument page surrounded by a decorative frame:
+
+```json
+"audiveris_options": {
+  "org.audiveris.omr.sheet.grid.StaffProjector.staffAbscissaMargin": "1.0"
+}
+```
+
+[Audiveris 5.11's default projection margin](https://github.com/Audiveris/audiveris/blob/5.11.0/app/src/main/java/org/audiveris/omr/sheet/grid/StaffProjector.java)
+is 15 staff interlines. A nearby vertical frame
+can then be mistaken for a connector between successive systems. Reducing the margin
+to one interline excludes the frame on the Carnaval test pages, restoring independent
+systems, their barlines and the 2/4 signature. Do not apply this setting globally:
+other layouts can need a wider margin for braces or brackets. For small vector pages
+that still lose a barline, also test
+`org.audiveris.omr.image.ImageLoading.pdfResolution` with the string value `"600"`.
+Higher resolution alone does not correct the false system connections.
+
 ### batch
 
 Runs every item of the manifest in order, exactly as `run` does, and writes each item's `output/<pdf stem>/status.json`. A failing item does not stop the others. Since all items are parts of the same piece, it then compares the measures read per part with each other and with each part's `expected_measures`.
