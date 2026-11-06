@@ -121,18 +121,23 @@ def test_constant_options_are_separate_arguments_and_logged(tmp_path: Path, pdf:
     result = run_audiveris(pdf, tmp_path / "out", audiveris=exe, options=options)
     args = json.loads(exe.with_suffix(".args").read_text())
     assert args[4:-2] == [
-        "-option", "org.audiveris.omr.image.ImageLoading.pdfResolution=600",
-        "-option", "org.audiveris.omr.sheet.grid.StaffProjector.staffAbscissaMargin=1.0",
+        "-option",
+        "org.audiveris.omr.image.ImageLoading.pdfResolution=600",
+        "-option",
+        "org.audiveris.omr.sheet.grid.StaffProjector.staffAbscissaMargin=1.0",
     ]
     for key, value in options.items():
         assert f"{key}={value}" in result.log_path.read_text()
 
 
-@pytest.mark.parametrize("options", [
-    {"-run": "SomeClass"},
-    {"org.audiveris.omr.image.ImageLoading.pdfResolution": "600\nother=true"},
-    {"org.audiveris.omr.image.ImageLoading.pdfResolution": r"600\nother=true"},
-])
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"-run": "SomeClass"},
+        {"org.audiveris.omr.image.ImageLoading.pdfResolution": "600\nother=true"},
+        {"org.audiveris.omr.image.ImageLoading.pdfResolution": r"600\nother=true"},
+    ],
+)
 def test_invalid_constant_options_fail_before_output_creation(tmp_path: Path, pdf: Path, options):
     out = tmp_path / "out"
     with pytest.raises(AudiverisError, match="invalid Audiveris constant"):
