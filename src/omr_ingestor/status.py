@@ -298,9 +298,13 @@ def dumps_status(item: ItemStatus) -> str:
 
 
 def write_status(item: ItemStatus, path: Path) -> None:
-    """Write status.json atomically: a temp file in the same folder, then os.replace."""
+    """Write status.json atomically (see write_text_atomic)."""
+    write_text_atomic(Path(path), dumps_status(item))
+
+
+def write_text_atomic(path: Path, text: str) -> None:
+    """Write a UTF-8 text file atomically: a temp file in the same folder, then os.replace."""
     path = Path(path)
-    text = dumps_status(item)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
