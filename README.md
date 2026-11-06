@@ -25,13 +25,7 @@ uv run omr-ingestor batch -o output music.json   # every item, then the cross-pa
 
 ### Audiveris settings per input
 
-An item can supply `audiveris_options`, a map of fully qualified constant names to
-scalar strings. Each entry becomes a separate `-option name=value` argument, recorded
-in the item's `audiveris/audiveris.log`. Names must start with `org.audiveris.omr.`;
-values allow letters, digits, `_`, `.`, `+` and `-`. Omitting the map keeps the
-installed Audiveris defaults. Options apply only to that item on both `run` and `batch`.
-Audiveris owns the constant names and their meanings; check its log for unsupported
-settings when changing tool versions.
+An item can supply `audiveris_options`, a map of fully qualified constant names to scalar strings. Each entry becomes a separate `-option name=value` argument, recorded in the item's `audiveris/audiveris.log`. Names must start with `org.audiveris.omr.`; values allow letters, digits, `_`, `.`, `+` and `-`. Omitting the map keeps the installed Audiveris defaults. Options apply only to that item on both `run` and `batch`. Audiveris owns the constant names and their meanings; check its log for unsupported settings when changing tool versions.
 
 The effective override map is recorded next to `tool_versions` in `status.json` (schema 3) and each `batch.json` item (schema 2). An empty map means tool defaults were used. Older status schemas remain readable with unknown options represented as `null`; batch items that never started also record `null`.
 
@@ -43,15 +37,7 @@ For a single-instrument page surrounded by a decorative frame:
 }
 ```
 
-[Audiveris 5.11's default projection margin](https://github.com/Audiveris/audiveris/blob/5.11.0/app/src/main/java/org/audiveris/omr/sheet/grid/StaffProjector.java)
-is 15 staff interlines. A nearby vertical frame
-can then be mistaken for a connector between successive systems. Reducing the margin
-to one interline excludes the frame on the Carnaval test pages, restoring independent
-systems, their barlines and the 2/4 signature. Do not apply this setting globally:
-other layouts can need a wider margin for braces or brackets. For small vector pages
-that still lose a barline, also test
-`org.audiveris.omr.image.ImageLoading.pdfResolution` with the string value `"600"`.
-Higher resolution alone does not correct the false system connections.
+[Audiveris 5.11's default projection margin](https://github.com/Audiveris/audiveris/blob/5.11.0/app/src/main/java/org/audiveris/omr/sheet/grid/StaffProjector.java) is 15 staff interlines. A nearby vertical frame can then be mistaken for a connector between successive systems. Reducing the margin to one interline excludes the frame on the Carnaval test pages, restoring independent systems, their barlines and the 2/4 signature. Do not apply this setting globally: other layouts can need a wider margin for braces or brackets. For small vector pages that still lose a barline, also test `org.audiveris.omr.image.ImageLoading.pdfResolution` with the string value `"600"`. Higher resolution alone does not correct the false system connections.
 
 ### batch
 
