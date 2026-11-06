@@ -113,7 +113,7 @@ def _run_one(manifest_path: Path, index: int, entry: dict[str, Any], output_dir:
     item = BatchItem(entry["pdf"], entry["instrument"], entry["expected_measures"], SETUP_ERROR)
     try:
         result = run_item(manifest_path, str(index), output_dir)
-    except PipelineSetupError as exc:
+    except (PipelineSetupError, OSError) as exc:
         return replace(item, error=str(exc))
     status = result.status
     failed = result.failed_stage

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from omr_ingestor import pipeline
 from omr_ingestor.audiveris import AUDIVERIS_ENV_VAR
 from omr_ingestor.batch import FAILED, PASSED, BatchItem, check_cross_part
 from omr_ingestor.cli import main
@@ -146,6 +147,44 @@ def test_a_failing_item_does_not_stop_the_others(batch: Batch, capsys):
     assert "[1/3] song-trumpet: failed at audiveris:" in out
     assert "song-trumpet   bb-trumpet  failed (audiveris)     -         3        -         -" in out
     assert "error: 2 of 3 item(s) did not pass: song-trumpet, song-trombone" in err
+
+
+def test_item_directory_conflict_does_not_abort_batch(batch: Batch):
+    batch.output.mkdir()
+    conflict = batch.output / "song-trumpet"
+    conflict.write_text("existing file")
+
+    assert batch.run() == 1
+
+    items = batch.items()  # Reads batch.json, which must still be written.
+    assert list(items) == list(PARTS)
+    assert items["song-trumpet"]["status"] == "setup_error"
+    assert str(conflict) in items["song-trumpet"]["error"]
+    assert items["song-trumpet"]["status_file"] is None
+    assert conflict.read_text() == "existing file"
+    for stem in ("song-trombone", "song-flute"):
+        assert items[stem]["status"] == PASSED
+        assert (batch.output / stem / f"{stem}.mscz").is_file()
+    assert batch.summary()["passed"] is False
+
+
+def test_item_status_write_error_does_not_abort_batch(batch: Batch, monkeypatch):
+    write_status = pipeline.write_status
+
+    def fail_after_audiveris(status, path):
+        if path.parent.name == "song-trumpet" and status.stage("audiveris").status == "passed":
+            raise PermissionError("status write denied")
+        write_status(status, path)
+
+    monkeypatch.setattr(pipeline, "write_status", fail_after_audiveris)
+    assert batch.run() == 1
+
+    items = batch.items()
+    assert items["song-trumpet"]["status"] == "setup_error"
+    assert items["song-trumpet"]["error"] == "status write denied"
+    assert items["song-trombone"]["status"] == PASSED
+    assert items["song-flute"]["status"] == PASSED
+    assert batch.summary()["passed"] is False
 
 
 def test_batch_records_each_items_options_on_success_failure_and_setup_error(batch: Batch):
