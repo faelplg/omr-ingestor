@@ -1,8 +1,11 @@
 """The per-item status.json: stage results, suspect and hand-corrected measures, acceptance.
 
 Measure numbers are kept as written in the score (strings), as in DurationReport.
-The acceptance block is derived from hand_corrected and expected_measures; it is
-written for people reading the file and recomputed (and checked) when reading it.
+The acceptance block is derived from hand_corrected and expected_measures, and the
+measure_count block from measures_read and expected_measures; both are written for
+people reading the file and recomputed (and checked) when reading it.
+
+Schema version 1 had no measure_count; such files still read, with measures_read None.
 """
 
 import json
@@ -14,7 +17,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+READABLE_SCHEMA_VERSIONS = (1, 2)
 ACCEPTANCE_PERCENT = 5  # up to 5% of expected_measures corrected by hand
 ACCEPTANCE_LIMIT = ACCEPTANCE_PERCENT / 100
 RATIO_DIGITS = 6
@@ -74,10 +78,19 @@ class Acceptance:
 
 
 @dataclass(frozen=True, slots=True)
+class MeasureCount:
+    read: int
+    expected: int
+    missing: int  # expected - read; negative when more measures were read than expected
+
+
+@dataclass(frozen=True, slots=True)
 class ItemStatus:
     pdf: str
     instrument: str
     expected_measures: int
+    # Measures read by the OMR in the part; None until the durations stage has counted them.
+    measures_read: int | None = None
     stages: tuple[Stage, ...] = ()
     suspect_measures: tuple[SuspectMeasure, ...] = ()
     # None until the human review is done; () means reviewed with nothing corrected.
@@ -92,6 +105,14 @@ class ItemStatus:
         ):
             raise StatusError(
                 f"expected_measures must be a positive integer, got {self.expected_measures!r}"
+            )
+        if self.measures_read is not None and (
+            isinstance(self.measures_read, bool)
+            or not isinstance(self.measures_read, int)
+            or self.measures_read < 0
+        ):
+            raise StatusError(
+                f"measures_read must be a non-negative integer, got {self.measures_read!r}"
             )
         names = [s.name for s in self.stages]
         if len(set(names)) != len(names):
@@ -112,6 +133,17 @@ class ItemStatus:
         return replace(self, stages=ordered)
 
     @property
+    def measure_count(self) -> MeasureCount | None:
+        """Measures read against expected_measures; None until they are counted."""
+        if self.measures_read is None:
+            return None
+        return MeasureCount(
+            read=self.measures_read,
+            expected=self.expected_measures,
+            missing=self.expected_measures - self.measures_read,
+        )
+
+    @property
     def acceptance(self) -> Acceptance | None:
         """The 5% criterion over expected_measures; None before the human review."""
         if self.hand_corrected is None:
@@ -130,11 +162,15 @@ class ItemStatus:
     def to_dict(self) -> dict[str, Any]:
         """Plain data with a fixed key order."""
         acceptance = self.acceptance
+        count = self.measure_count
         return {
             "schema_version": SCHEMA_VERSION,
             "pdf": self.pdf,
             "instrument": self.instrument,
             "expected_measures": self.expected_measures,
+            "measure_count": None
+            if count is None
+            else {"read": count.read, "expected": count.expected, "missing": count.missing},
             "stages": [
                 {
                     "name": s.name,
@@ -179,21 +215,34 @@ _TOP_KEYS = (
     "pdf",
     "instrument",
     "expected_measures",
+    "measure_count",
     "stages",
     "suspect_measures",
     "hand_corrected",
     "acceptance",
     "tool_versions",
 )
+_V1_TOP_KEYS = tuple(k for k in _TOP_KEYS if k != "measure_count")
 
 
 def _from_dict(cls: type[ItemStatus], data: Any, source: str) -> ItemStatus:
     _expect(data, dict, source)
-    if sorted(data) != sorted(_TOP_KEYS):
-        raise StatusError(f"{source}: keys {sorted(data)}, expected {sorted(_TOP_KEYS)}")
-    if data["schema_version"] != SCHEMA_VERSION:
+    version = data.get("schema_version")
+    if version not in READABLE_SCHEMA_VERSIONS or isinstance(version, bool):
         raise StatusError(
-            f"{source}: schema_version {data['schema_version']!r}, expected {SCHEMA_VERSION}"
+            f"{source}: schema_version {version!r}, expected one of "
+            f"{list(READABLE_SCHEMA_VERSIONS)}"
+        )
+    keys = _TOP_KEYS if version == SCHEMA_VERSION else _V1_TOP_KEYS
+    if sorted(data) != sorted(keys):
+        raise StatusError(f"{source}: keys {sorted(data)}, expected {sorted(keys)}")
+    count = data.get("measure_count")
+    measures_read = None
+    if count is not None:
+        measures_read = _expect(
+            _expect(count, dict, f"{source}.measure_count")["read"],
+            int,
+            f"{source}.measure_count.read",
         )
     stages = tuple(
         Stage(
@@ -226,11 +275,16 @@ def _from_dict(cls: type[ItemStatus], data: Any, source: str) -> ItemStatus:
         pdf=_expect(data["pdf"], str, f"{source}.pdf"),
         instrument=_expect(data["instrument"], str, f"{source}.instrument"),
         expected_measures=_expect(data["expected_measures"], int, f"{source}.expected_measures"),
+        measures_read=measures_read,
         stages=stages,
         suspect_measures=suspects,
         hand_corrected=hand,
         tool_versions=dict(versions),
     )
+    if count != item.to_dict()["measure_count"]:
+        raise StatusError(
+            f"{source}: measure_count {count!r} does not match its read count and expected_measures"
+        )
     if data["acceptance"] != item.to_dict()["acceptance"]:
         raise StatusError(
             f"{source}: acceptance {data['acceptance']!r} does not match hand_corrected and "

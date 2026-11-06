@@ -258,17 +258,22 @@ def _durations(ctx: _Context) -> str:
     report = check_durations(root)
     ctx.report = report
     suspects = report.suspects
+    counts = [len(part.findall("measure")) for part in root.findall("part")]
+    # The fix-up works on one part; with several there is no single count to record.
     ctx.status = replace(
         ctx.status,
         suspect_measures=tuple(SuspectMeasure(m.number, m.describe()) for m in suspects),
+        measures_read=counts[0] if len(counts) == 1 else None,
     )
-    counts = [len(part.findall("measure")) for part in root.findall("part")]
+    expected = ctx.status.expected_measures
     read = "/".join(map(str, counts)) or "0"
-    detail = (
-        f"{len(suspects)} suspect measure(s); {read} measure(s) read, "
-        f"{ctx.status.expected_measures} expected"
-    )
-    if any(c != ctx.status.expected_measures for c in counts):
+    detail = f"{len(suspects)} suspect measure(s); {read} measure(s) read, {expected} expected"
+    if (count := ctx.status.measure_count) is not None:
+        if count.missing >= 0:
+            detail += f", {count.missing} missing"
+        else:
+            detail += f", {-count.missing} extra"
+    elif any(c != expected for c in counts):
         detail += " (count differs)"
     return detail
 
