@@ -15,7 +15,7 @@ The batch passes only when every item passed.
 import json
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +24,7 @@ from omr_ingestor.pipeline import PipelineSetupError, run_item
 from omr_ingestor.status import MeasureCount, StageState, write_text_atomic
 
 BATCH_NAME = "batch.json"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 PASSED = "passed"
 FAILED = "failed"
@@ -42,6 +42,8 @@ class BatchItem:
     failed_stage: str | None = None
     error: str | None = None
     status_file: Path | None = None  # None when the item did not start (setup error)
+    tool_versions: dict[str, str] = field(default_factory=dict)
+    audiveris_options: dict[str, str] | None = None  # None when the item did not start
 
     @property
     def stem(self) -> str:
@@ -125,6 +127,10 @@ def _run_one(manifest_path: Path, index: int, entry: dict[str, Any], output_dir:
         failed_stage=None if failed is None else failed.name,
         error=None if failed is None else failed.detail,
         status_file=result.paths.status,
+        tool_versions=dict(status.tool_versions),
+        audiveris_options=None
+        if status.audiveris_options is None
+        else dict(status.audiveris_options),
     )
 
 
@@ -174,6 +180,10 @@ def _item_dict(item: BatchItem, output_dir: Path) -> dict[str, Any]:
         "status_file": None
         if item.status_file is None
         else item.status_file.relative_to(output_dir).as_posix(),
+        "tool_versions": dict(sorted(item.tool_versions.items())),
+        "audiveris_options": None
+        if item.audiveris_options is None
+        else dict(sorted(item.audiveris_options.items())),
     }
 
 

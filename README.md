@@ -33,6 +33,8 @@ installed Audiveris defaults. Options apply only to that item on both `run` and 
 Audiveris owns the constant names and their meanings; check its log for unsupported
 settings when changing tool versions.
 
+The effective override map is recorded next to `tool_versions` in `status.json` (schema 3) and each `batch.json` item (schema 2). An empty map means tool defaults were used. Older status schemas remain readable with unknown options represented as `null`; batch items that never started also record `null`.
+
 For a single-instrument page surrounded by a decorative frame:
 
 ```json

@@ -91,6 +91,7 @@ def test_all_items_pass_and_agree(batch: Batch, capsys):
         assert status.instrument == instrument
         assert (batch.output / stem / f"{stem}.mscz").exists()
     summary = batch.summary()
+    assert summary["schema_version"] == 2
     assert summary["passed"] is True
     assert [it["stem"] for it in summary["items"]] == list(PARTS)
     assert summary["items"][0] == {
@@ -103,6 +104,8 @@ def test_all_items_pass_and_agree(batch: Batch, capsys):
         "measures": {"read": 3, "expected": 3, "missing": 0},
         "suspect_count": 1,
         "status_file": "song-trumpet/status.json",
+        "tool_versions": {"audiveris": "5.11.0", "musescore": "4.7.5"},
+        "audiveris_options": {},
     }
     assert summary["cross_part"] == {
         "all_agree": True,
@@ -143,6 +146,32 @@ def test_a_failing_item_does_not_stop_the_others(batch: Batch, capsys):
     assert "[1/3] song-trumpet: failed at audiveris:" in out
     assert "song-trumpet   bb-trumpet  failed (audiveris)     -         3        -         -" in out
     assert "error: 2 of 3 item(s) did not pass: song-trumpet, song-trombone" in err
+
+
+def test_batch_records_each_items_options_on_success_failure_and_setup_error(batch: Batch):
+    options = {"org.audiveris.omr.sheet.grid.StaffProjector.staffAbscissaMargin": "1.0"}
+    data = json.loads(batch.manifest.read_text())
+    data["items"][0]["audiveris_options"] = options
+    data["items"][1]["audiveris_options"] = options
+    batch.manifest.write_text(json.dumps(data))
+    batch.movements["song-trumpet"] = []
+    (batch.root / "project/pdfs/song-trombone.pdf").write_bytes(b"changed")
+    assert batch.run() == 1
+    items = batch.items()
+    assert items["song-trumpet"]["audiveris_options"] == options
+    assert items["song-trombone"]["audiveris_options"] is None
+    assert items["song-trombone"]["tool_versions"] == {}
+    assert items["song-flute"]["audiveris_options"] == {}
+    for stem in ("song-trumpet", "song-flute"):
+        saved = json.loads((batch.output / stem / "status.json").read_text())
+        assert items[stem]["audiveris_options"] == saved["audiveris_options"]
+        assert items[stem]["tool_versions"] == saved["tool_versions"]
+
+    batch.movements["song-trumpet"] = [omr_score()]
+    assert batch.run() == 1
+    assert batch.items()["song-trumpet"]["status"] == PASSED
+    assert batch.items()["song-trumpet"]["audiveris_options"] == options
+    assert read_status(batch.output / "song-trumpet/status.json").audiveris_options == options
 
 
 def test_parts_that_disagree_are_a_warning(batch: Batch, capsys):

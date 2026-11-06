@@ -169,6 +169,7 @@ def test_runs_every_stage(setup: Setup, capsys):
     assert [m.number for m in status.suspect_measures] == ["2"]
     assert status.hand_corrected is None
     assert status.tool_versions == {"audiveris": "5.11.0", "musescore": "4.7.5"}
+    assert status.audiveris_options == {}
     assert status.measure_count == MeasureCount(read=3, expected=3, missing=0)
     assert status.stage("durations").detail == (
         "1 suspect measure(s); 3 measure(s) read, 3 expected, 0 missing"
@@ -194,11 +195,15 @@ def test_manifest_options_reach_audiveris_without_leaking_to_later_runs(setup: S
     assert setup.run() == 0
     log = setup.item_dir / "audiveris" / "audiveris.log"
     assert f"-option {option}" in log.read_text()
+    assert setup.status().audiveris_options == data["items"][0]["audiveris_options"]
+    seen = read_status(setup.bin / "mscore.status.json")
+    assert seen.audiveris_options == setup.status().audiveris_options
 
     del data["items"][0]["audiveris_options"]
     setup.manifest.write_text(json.dumps(data))
     assert setup.run() == 0
     assert "-option" not in log.read_text()
+    assert setup.status().audiveris_options == {}
 
 
 def test_status_is_written_after_each_stage(setup: Setup):

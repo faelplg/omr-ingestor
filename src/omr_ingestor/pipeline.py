@@ -223,7 +223,6 @@ class _Context:
     page_size: PageSize
     paths: ItemPaths
     status: ItemStatus
-    audiveris_options: dict[str, str]
     raw_musicxml: Path | None = None
     report: DurationReport | None = None
 
@@ -241,7 +240,7 @@ def _audiveris(ctx: _Context) -> str:
         ctx.pdf,
         ctx.paths.audiveris_dir,
         audiveris=ctx.tools.audiveris,
-        options=ctx.audiveris_options,
+        options=ctx.status.audiveris_options,
     )
     ctx.set_version("audiveris", result.version)
     files = result.musicxml_files
@@ -371,6 +370,7 @@ def _prepare(manifest_path: Path, selector: str, output_dir: Path) -> _Context:
         expected_measures=item["expected_measures"],
         stages=tuple(Stage(name, StageState.PENDING) for name in STAGE_NAMES),
         hand_corrected=previous.hand_corrected if previous else None,
+        audiveris_options=dict(item.get("audiveris_options", {})),
     )
     return _Context(
         tools=tools,
@@ -380,7 +380,6 @@ def _prepare(manifest_path: Path, selector: str, output_dir: Path) -> _Context:
         page_size=style_page_size(style),
         paths=paths,
         status=status,
-        audiveris_options=item.get("audiveris_options", {}),
     )
 
 

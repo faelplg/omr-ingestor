@@ -6,6 +6,7 @@ measure_count block from measures_read and expected_measures; both are written f
 people reading the file and recomputed (and checked) when reading it.
 
 Schema version 1 had no measure_count; such files still read, with measures_read None.
+Versions 1 and 2 did not record audiveris_options; these read as None (unknown).
 """
 
 import json
@@ -17,8 +18,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 2
-READABLE_SCHEMA_VERSIONS = (1, 2)
+SCHEMA_VERSION = 3
+READABLE_SCHEMA_VERSIONS = (1, 2, 3)
 ACCEPTANCE_PERCENT = 5  # up to 5% of expected_measures corrected by hand
 ACCEPTANCE_LIMIT = ACCEPTANCE_PERCENT / 100
 RATIO_DIGITS = 6
@@ -96,6 +97,8 @@ class ItemStatus:
     # None until the human review is done; () means reviewed with nothing corrected.
     hand_corrected: tuple[str, ...] | None = None
     tool_versions: dict[str, str] = field(default_factory=dict)
+    # Overrides passed to Audiveris; {} uses tool defaults, None means not recorded.
+    audiveris_options: dict[str, str] | None = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if (
@@ -194,6 +197,9 @@ class ItemStatus:
                 "accepted": acceptance.accepted,
             },
             "tool_versions": dict(sorted(self.tool_versions.items())),
+            "audiveris_options": None
+            if self.audiveris_options is None
+            else dict(sorted(self.audiveris_options.items())),
         }
 
     @classmethod
@@ -221,8 +227,10 @@ _TOP_KEYS = (
     "hand_corrected",
     "acceptance",
     "tool_versions",
+    "audiveris_options",
 )
-_V1_TOP_KEYS = tuple(k for k in _TOP_KEYS if k != "measure_count")
+_V2_TOP_KEYS = tuple(k for k in _TOP_KEYS if k != "audiveris_options")
+_V1_TOP_KEYS = tuple(k for k in _V2_TOP_KEYS if k != "measure_count")
 
 
 def _from_dict(cls: type[ItemStatus], data: Any, source: str) -> ItemStatus:
@@ -233,7 +241,7 @@ def _from_dict(cls: type[ItemStatus], data: Any, source: str) -> ItemStatus:
             f"{source}: schema_version {version!r}, expected one of "
             f"{list(READABLE_SCHEMA_VERSIONS)}"
         )
-    keys = _TOP_KEYS if version == SCHEMA_VERSION else _V1_TOP_KEYS
+    keys = {1: _V1_TOP_KEYS, 2: _V2_TOP_KEYS, 3: _TOP_KEYS}[version]
     if sorted(data) != sorted(keys):
         raise StatusError(f"{source}: keys {sorted(data)}, expected {sorted(keys)}")
     count = data.get("measure_count")
@@ -271,6 +279,12 @@ def _from_dict(cls: type[ItemStatus], data: Any, source: str) -> ItemStatus:
     versions = _expect(data["tool_versions"], dict, f"{source}.tool_versions")
     for k, v in versions.items():
         _expect(v, str, f"{source}.tool_versions.{k}")
+    options = data.get("audiveris_options")
+    if options is not None:
+        _expect(options, dict, f"{source}.audiveris_options")
+        for k, v in options.items():
+            _expect(k, str, f"{source}.audiveris_options key")
+            _expect(v, str, f"{source}.audiveris_options.{k}")
     item = cls(
         pdf=_expect(data["pdf"], str, f"{source}.pdf"),
         instrument=_expect(data["instrument"], str, f"{source}.instrument"),
@@ -280,6 +294,7 @@ def _from_dict(cls: type[ItemStatus], data: Any, source: str) -> ItemStatus:
         suspect_measures=suspects,
         hand_corrected=hand,
         tool_versions=dict(versions),
+        audiveris_options=None if options is None else dict(options),
     )
     if count != item.to_dict()["measure_count"]:
         raise StatusError(
