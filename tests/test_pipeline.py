@@ -49,8 +49,8 @@ def trumpet_mscx(instrument_id: str = TRUMPET.id) -> str:
     return mscx_xml(part_xml(instrument_id, TRUMPET.name_pt, t.diatonic, t.chromatic))
 
 
-def fake_audiveris(bin_dir: Path, movements: list[str]) -> Path:
-    """Writes one .mxl per MusicXML text in movements."""
+def fake_audiveris(bin_dir: Path, movements: list[str] | dict[str, list[str]]) -> Path:
+    """Writes one .mxl per MusicXML text in movements (or in movements[pdf stem])."""
     return make_tool(
         bin_dir,
         "Audiveris",
@@ -62,6 +62,8 @@ def fake_audiveris(bin_dir: Path, movements: list[str]) -> Path:
         pdf = Path(args[args.index("--") + 1])
         print("Audiveris version 5.11.0")
         movements = {movements!r}
+        if isinstance(movements, dict):
+            movements = movements[pdf.stem]
         for i, text in enumerate(movements, 1):
             name = pdf.stem + (f".mvt{{i}}" if len(movements) > 1 else "") + ".mxl"
             with zipfile.ZipFile(out / name, "w") as zf:
@@ -71,8 +73,8 @@ def fake_audiveris(bin_dir: Path, movements: list[str]) -> Path:
     )
 
 
-def fake_musescore(bin_dir: Path, mscx: str) -> Path:
-    """Writes mscx plus the -S style, and snapshots status.json as it was when called."""
+def fake_musescore(bin_dir: Path, mscx: str | dict[str, str]) -> Path:
+    """Writes mscx (or mscx[pdf stem]) plus the -S style; snapshots status.json as it was."""
     return make_tool(
         bin_dir,
         "mscore",
@@ -88,8 +90,11 @@ def fake_musescore(bin_dir: Path, mscx: str) -> Path:
         out = Path(args[args.index("-o") + 1])
         style = Path(args[args.index("-S") + 1])
         shutil.copy(out.parent.parent / "status.json", here.with_suffix(".status.json"))
+        mscx = {mscx!r}
+        if isinstance(mscx, dict):
+            mscx = mscx[out.parent.parent.name]
         with zipfile.ZipFile(out, "w") as zf:
-            zf.writestr("score.mscx", {mscx!r})
+            zf.writestr("score.mscx", mscx)
             zf.writestr("score_style.mss", style.read_text())
         sys.exit(134)
         """,
