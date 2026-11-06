@@ -306,8 +306,10 @@ def _durations(ctx: _Context) -> str:
 
 def _fixup(ctx: _Context) -> str:
     root = read_musicxml(ctx.raw_musicxml)
+    parts = root.findall("part")
+    if not parts:
+        raise StageError("score has no parts")
     if ctx.parts is None:
-        parts = root.findall("part")
         if len(parts) != 1:
             raise StageError(
                 f"score has {len(parts)} parts {part_ids(root)}; "
@@ -315,7 +317,6 @@ def _fixup(ctx: _Context) -> str:
             )
         names = [None]
     else:
-        parts = root.findall("part")
         if len(parts) != len(ctx.parts):
             raise StageError(
                 f"score has {len(parts)} parts; manifest parts expects {len(ctx.parts)}"

@@ -548,4 +548,15 @@ def test_multipart_measure_counts_and_batch_summary(setup, monkeypatch, second_c
     else:
         assert status.measures_read is None
         assert cross["not_counted"] == [STEM]
-        assert f"warning: no common measure count: {STEM}" in warnings
+        assert f"warning: parts read different measure counts: {STEM}" in warnings
+        assert "failed before durations" not in warnings
+
+
+@pytest.mark.parametrize("parts", [None, ["Trumpet 1", "Trumpet 2"]])
+def test_score_without_parts_has_its_own_error(setup, monkeypatch, parts):
+    configure_parts(setup, parts)
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [score({})])))
+    assert setup.run() == 1
+    status = setup.status()
+    assert status.stage("fixup").detail == "score has no parts"
+    assert status.stage("musescore").status.value == "skipped"
