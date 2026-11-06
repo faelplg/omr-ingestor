@@ -10,6 +10,7 @@ from omr_ingestor.audiveris import AUDIVERIS_ENV_VAR
 from omr_ingestor.batch import FAILED, PASSED, BatchItem, BatchResult, check_cross_part
 from omr_ingestor.cli import _print_batch, main
 from omr_ingestor.musescore import MUSESCORE_ENV_VAR
+from omr_ingestor.pipeline import UncountedReason
 from omr_ingestor.status import read_status
 from omr_ingestor.xsd import XSD_ENV_VAR
 from tests.musicxml_builders import DEFAULT_ATTRS, measure, note, score
@@ -345,9 +346,21 @@ def test_cross_part_tie_lists_every_counted_part():
 def test_batch_warns_once_for_each_uncounted_cause(tmp_path, capsys):
     items = (
         BatchItem("early.pdf", "bb-trumpet", 3, FAILED, failed_stage="audiveris"),
-        BatchItem("multi.pdf", "bb-trumpet", 3, PASSED, suspect_count=0),
         BatchItem(
-            "other-multi.pdf", "bb-trumpet", 3, FAILED, suspect_count=1, failed_stage="fixup"
+            "multi.pdf",
+            "bb-trumpet",
+            3,
+            PASSED,
+            uncounted_reason=UncountedReason.DIFFERENT_COUNTS,
+        ),
+        BatchItem(
+            "other-multi.pdf",
+            "bb-trumpet",
+            3,
+            FAILED,
+            suspect_count=1,
+            failed_stage="fixup",
+            uncounted_reason=UncountedReason.DIFFERENT_COUNTS,
         ),
     )
     _print_batch(BatchResult("Synthetic", items, check_cross_part(items), tmp_path / "batch.json"))

@@ -7,7 +7,7 @@ from pathlib import Path
 from omr_ingestor.batch import BatchItem, BatchResult, run_batch
 from omr_ingestor.instruments import InstrumentsError, load_instruments
 from omr_ingestor.manifest import ManifestError, load_manifest
-from omr_ingestor.pipeline import PipelineSetupError, RunResult, run_item
+from omr_ingestor.pipeline import PipelineSetupError, RunResult, UncountedReason, run_item
 from omr_ingestor.status import StageState
 
 
@@ -88,16 +88,8 @@ def _print_batch(result: BatchResult) -> None:
         print(f"warning: measure count differs from expected_measures: {listed}", file=sys.stderr)
     if check.not_counted:
         uncounted = [it for it in result.items if it.stem in check.not_counted]
-        for reason, stems in (
-            (
-                "measures not counted (failed before durations)",
-                [it.stem for it in uncounted if it.suspect_count is None],
-            ),
-            (
-                "parts read different measure counts",
-                [it.stem for it in uncounted if it.suspect_count is not None],
-            ),
-        ):
+        for reason in UncountedReason:
+            stems = [it.stem for it in uncounted if it.uncounted_reason is reason]
             if stems:
                 print(f"warning: {reason}: {', '.join(stems)}", file=sys.stderr)
     if not check.expected_agree:

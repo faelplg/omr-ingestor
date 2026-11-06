@@ -560,3 +560,30 @@ def test_score_without_parts_has_its_own_error(setup, monkeypatch, parts):
     status = setup.status()
     assert status.stage("fixup").detail == "score has no parts"
     assert status.stage("musescore").status.value == "skipped"
+
+
+@pytest.mark.parametrize("second_count", [1, 2])
+def test_batch_multipart_without_configuration_reports_missing_parts(
+    setup, monkeypatch, capsys, second_count
+):
+    xml = score(
+        {
+            pid: [
+                measure(n, (DEFAULT_ATTRS if n == 1 else "") + note(4)) for n in range(1, count + 1)
+            ]
+            for pid, count in (("P1", 2), ("P2", second_count))
+        }
+    )
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [xml])))
+    assert main(["batch", "-o", str(setup.output), str(setup.manifest)]) == 1
+    status = setup.status()
+    assert status.measures_read is None
+    assert status.stage("fixup").detail == (
+        "score has 2 parts ['P1', 'P2']; list their names in the item's \"parts\""
+    )
+    warnings = capsys.readouterr().err
+    assert (
+        f'warning: multipart score requires the item\'s "parts" configuration: {STEM}' in warnings
+    )
+    assert "parts read different measure counts" not in warnings
+    assert "failed before durations" not in warnings

@@ -25,6 +25,7 @@ import time
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -112,10 +113,18 @@ class ItemPaths:
         )
 
 
+class UncountedReason(StrEnum):
+    BEFORE_DURATIONS = "measures not counted (failed before durations)"
+    MISSING_PARTS = 'multipart score requires the item\'s "parts" configuration'
+    DIFFERENT_COUNTS = "parts read different measure counts"
+    NO_PARTS = "score has no parts"
+
+
 @dataclass(frozen=True, slots=True)
 class RunResult:
     paths: ItemPaths
     status: ItemStatus
+    uncounted_reason: UncountedReason | None = UncountedReason.BEFORE_DURATIONS
 
     @property
     def ok(self) -> bool:
@@ -234,6 +243,7 @@ class _Context:
     parts: tuple[str, ...] | None = None
     raw_musicxml: Path | None = None
     report: DurationReport | None = None
+    uncounted_reason: UncountedReason | None = UncountedReason.BEFORE_DURATIONS
 
     def save(self) -> None:
         write_status(self.status, self.paths.status)
@@ -281,6 +291,14 @@ def _durations(ctx: _Context) -> str:
         if len(counts) == 1 or (ctx.parts is not None and len(set(counts)) == 1)
         else None,
     )
+    if ctx.status.measures_read is not None:
+        ctx.uncounted_reason = None
+    elif not counts:
+        ctx.uncounted_reason = UncountedReason.NO_PARTS
+    elif ctx.parts is None:
+        ctx.uncounted_reason = UncountedReason.MISSING_PARTS
+    else:
+        ctx.uncounted_reason = UncountedReason.DIFFERENT_COUNTS
     expected = ctx.status.expected_measures
     read = "/".join(map(str, counts)) or "0"
     if ctx.parts is not None:
@@ -465,4 +483,4 @@ def _run_stages(ctx: _Context) -> RunResult:
             Stage(name, StageState.PASSED, time.monotonic() - start, detail)
         )
         ctx.save()
-    return RunResult(ctx.paths, ctx.status)
+    return RunResult(ctx.paths, ctx.status, ctx.uncounted_reason)
