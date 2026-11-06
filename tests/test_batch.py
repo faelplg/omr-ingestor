@@ -168,19 +168,31 @@ def test_item_directory_conflict_does_not_abort_batch(batch: Batch):
     assert batch.summary()["passed"] is False
 
 
-def test_item_status_write_error_does_not_abort_batch(batch: Batch, monkeypatch):
+@pytest.mark.parametrize("started", [False, True], ids=["initial-write", "mid-run-write"])
+def test_item_status_write_error_does_not_abort_batch(batch: Batch, monkeypatch, started):
     write_status = pipeline.write_status
 
-    def fail_after_audiveris(status, path):
-        if path.parent.name == "song-trumpet" and status.stage("audiveris").status == "passed":
+    def fail_status_write(status, path):
+        if path.parent.name == "song-trumpet" and (
+            not started or status.stage("audiveris").status == "passed"
+        ):
             raise PermissionError("status write denied")
         write_status(status, path)
 
-    monkeypatch.setattr(pipeline, "write_status", fail_after_audiveris)
+    monkeypatch.setattr(pipeline, "write_status", fail_status_write)
     assert batch.run() == 1
 
     items = batch.items()
-    assert items["song-trumpet"]["status"] == "setup_error"
+    assert items["song-trumpet"]["status"] == (FAILED if started else "setup_error")
+    assert items["song-trumpet"]["status_file"] == (
+        "song-trumpet/status.json" if started else None
+    )
+    assert items["song-trumpet"]["audiveris_options"] == ({} if started else None)
+    status_file = batch.output / "song-trumpet/status.json"
+    assert status_file.is_file() is started
+    if started:
+        assert read_status(status_file).stage("audiveris").status == "pending"
+        assert list((batch.output / "song-trumpet/audiveris").glob("*.musicxml"))
     assert items["song-trumpet"]["error"] == "status write denied"
     assert items["song-trombone"]["status"] == PASSED
     assert items["song-flute"]["status"] == PASSED
