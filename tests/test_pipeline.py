@@ -206,6 +206,29 @@ def test_manifest_options_reach_audiveris_without_leaking_to_later_runs(setup: S
     assert setup.status().audiveris_options == {}
 
 
+@pytest.mark.parametrize("location", ["name", "value"])
+@pytest.mark.parametrize("ending", ["\n", "\r\n"])
+def test_option_newlines_fail_manifest_validation_before_setup(
+    setup: Setup, monkeypatch, capsys, location, ending
+):
+    data = json.loads(setup.manifest.read_text())
+    name, value = "org.audiveris.omr.image.ImageLoading.pdfResolution", "600"
+    if location == "name":
+        name += ending
+    else:
+        value += ending
+    data["items"][0]["audiveris_options"] = {name: value}
+    setup.manifest.write_text(json.dumps(data))
+
+    def unexpected_setup():
+        pytest.fail("tool setup must not run for an invalid manifest")
+
+    monkeypatch.setattr("omr_ingestor.pipeline.resolve_tools", unexpected_setup)
+    assert setup.run() == 1
+    assert "invalid manifest" in capsys.readouterr().err
+    assert not setup.output.exists()
+
+
 def test_status_is_written_after_each_stage(setup: Setup):
     assert setup.run() == 0
     # The copy MuseScore saw: everything before it passed, the rest still pending.

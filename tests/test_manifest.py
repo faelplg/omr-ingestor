@@ -27,6 +27,10 @@ def test_example_manifest_is_valid():
     ({"org.audiveris.omr.image.ImageLoading.pdfResolution": 600}, False),
     ({"-run": "SomeClass"}, False),
     ({"org.audiveris.omr.image.ImageLoading.pdfResolution": "600\nfoo=true"}, False),
+    ({"org.audiveris.omr.image.ImageLoading.pdfResolution": "600\n"}, False),
+    ({"org.audiveris.omr.image.ImageLoading.pdfResolution": "600\r\n"}, False),
+    ({"org.audiveris.omr.image.ImageLoading.pdfResolution\n": "600"}, False),
+    ({"org.audiveris.omr.image.ImageLoading.pdfResolution\r\n": "600"}, False),
 ])
 def test_audiveris_options_schema(example, options, valid):
     example["items"][0]["audiveris_options"] = options
