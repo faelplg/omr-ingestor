@@ -13,7 +13,7 @@ from omr_ingestor.instruments import load_instruments
 from omr_ingestor.musescore import MUSESCORE_ENV_VAR
 from omr_ingestor.musicxml import read_musicxml
 from omr_ingestor.pipeline import PipelineSetupError, run_item, select_item
-from omr_ingestor.status import STAGE_NAMES, read_status, write_status
+from omr_ingestor.status import STAGE_NAMES, MeasureCount, read_status, write_status
 from omr_ingestor.xsd import XSD_ENV_VAR
 from tests.fake_tools import make_tool
 from tests.musicxml_builders import DEFAULT_ATTRS, measure, multiple_rest, note, rest, score
@@ -164,7 +164,10 @@ def test_runs_every_stage(setup: Setup, capsys):
     assert [m.number for m in status.suspect_measures] == ["2"]
     assert status.hand_corrected is None
     assert status.tool_versions == {"audiveris": "5.11.0", "musescore": "4.7.5"}
-    assert "3 measure(s) read, 3 expected" in status.stage("durations").detail
+    assert status.measure_count == MeasureCount(read=3, expected=3, missing=0)
+    assert status.stage("durations").detail == (
+        "1 suspect measure(s); 3 measure(s) read, 3 expected, 0 missing"
+    )
     assert all(s.duration_s >= 0 for s in status.stages)
 
     fixed = read_musicxml(setup.item_dir / f"{STEM}.musicxml")
@@ -315,8 +318,10 @@ def test_multi_measure_rests_are_marked_for_review(setup: Setup, monkeypatch):
     monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [xml])))
     assert setup.run() == 0
 
+    status = setup.status()
+    assert status.measure_count == MeasureCount(read=3, expected=3, missing=0)
     reason = "multi-measure rest read as 1 bar(s); check the real length in the PDF"
-    assert [(m.number, m.detail) for m in setup.status().suspect_measures] == [
+    assert [(m.number, m.detail) for m in status.suspect_measures] == [
         ("2", f"part P1 measure 2: {reason}"),
         ("3", f"part P1 measure 3: 3 quarter(s), expected 4 (4/4); {reason}"),
     ]
@@ -326,6 +331,26 @@ def test_multi_measure_rests_are_marked_for_review(setup: Setup, monkeypatch):
             f"part/measure[@number='{number}']/direction/direction-type/rehearsal"
         )
         assert [m.text for m in marks] == ["?"]
+
+
+@pytest.mark.parametrize(
+    ("expected", "missing", "detail"),
+    [
+        (5, 2, "3 measure(s) read, 5 expected, 2 missing"),
+        (2, -1, "3 measure(s) read, 2 expected, 1 extra"),
+    ],
+)
+def test_measure_count_difference_reaches_the_status(setup: Setup, expected, missing, detail):
+    data = json.loads(setup.manifest.read_text(encoding="utf-8"))
+    data["items"][0]["expected_measures"] = expected
+    setup.manifest.write_text(json.dumps(data), encoding="utf-8")
+    assert setup.run() == 0
+
+    status = setup.status()
+    assert status.measure_count == MeasureCount(read=3, expected=expected, missing=missing)
+    assert status.stage("durations").detail.endswith(detail)
+    saved = json.loads((setup.item_dir / "status.json").read_text())
+    assert saved["measure_count"] == {"read": 3, "expected": expected, "missing": missing}
 
 
 def test_page_size_comes_from_the_style(setup: Setup):

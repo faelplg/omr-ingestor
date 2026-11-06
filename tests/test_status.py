@@ -19,6 +19,7 @@ def sample(**changes) -> ItemStatus:
         "pdf": "pdfs/song-trumpet.pdf",
         "instrument": "bb-trumpet",
         "expected_measures": 60,
+        "measures_read": 51,
         "stages": (
             Stage("audiveris", StageState.PASSED, 41.25),
             Stage("durations", StageState.PASSED, 0.03, "2 suspect measures"),
@@ -44,10 +45,32 @@ def test_round_trip(tmp_path):
 
 def test_round_trip_before_review(tmp_path):
     path = tmp_path / "status.json"
-    item = sample(hand_corrected=None, stages=(), suspect_measures=(), tool_versions={})
+    item = sample(
+        hand_corrected=None,
+        measures_read=None,
+        stages=(),
+        suspect_measures=(),
+        tool_versions={},
+    )
     write_status(item, path)
     assert read_status(path) == item
-    assert json.loads(path.read_text(encoding="utf-8"))["acceptance"] is None
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["acceptance"] is None
+    assert data["measure_count"] is None
+
+
+def test_measure_count_records_missing_and_extra_measures():
+    assert sample().to_dict()["measure_count"] == {"read": 51, "expected": 60, "missing": 9}
+    assert sample(measures_read=62).measure_count.missing == -2
+
+
+def test_reads_schema_version_1(tmp_path):
+    path = tmp_path / "status.json"
+    data = sample().to_dict()
+    del data["measure_count"]
+    data["schema_version"] = 1
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert read_status(path) == sample(measures_read=None)
 
 
 def test_stable_key_order_and_bytes(tmp_path):
@@ -61,6 +84,7 @@ def test_stable_key_order_and_bytes(tmp_path):
         "pdf",
         "instrument",
         "expected_measures",
+        "measure_count",
         "stages",
         "suspect_measures",
         "hand_corrected",
@@ -123,6 +147,7 @@ def test_write_leaves_no_temp_file_and_keeps_old_file_on_failure(tmp_path, monke
         (lambda: Stage("unknown", StageState.PASSED), "unknown stage"),
         (lambda: Stage("xsd", StageState.PASSED, -1.0), "invalid duration"),
         (lambda: sample(expected_measures=0), "positive integer"),
+        (lambda: sample(measures_read=-1), "non-negative integer"),
         (lambda: sample(hand_corrected=("1", "1")), "duplicate measure"),
         (
             lambda: sample(stages=(Stage("xsd", StageState.PASSED),) * 2),
@@ -139,7 +164,9 @@ def test_invalid_values_raise(make, message):
     ("edit", "message"),
     [
         (lambda d: d["acceptance"].update(accepted=False), "does not match"),
-        (lambda d: d.update(schema_version=2), "schema_version"),
+        (lambda d: d.update(schema_version=3), "schema_version"),
+        (lambda d: d["measure_count"].update(missing=0), "measure_count"),
+        (lambda d: d.update(measure_count=None, schema_version=1), "keys"),
         (lambda d: d.update(extra=1), "keys"),
         (lambda d: d["stages"][0].update(status="done"), "malformed status"),
         (lambda d: d.update(expected_measures="60"), "expected_measures"),
