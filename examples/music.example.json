@@ -3,7 +3,7 @@
   "title": "EXAMPLE - Fictional Song",
   "style": "~/Documents/MuseScore4/Styles/Estilo 2026.mss",
   "items": [
-    {"pdf": "pdfs/example-trumpet.pdf", "instrument": "bb-trumpet", "sha256": "0000000000000000000000000000000000000000000000000000000000000000", "expected_measures": 64},
+    {"pdf": "pdfs/example-trumpet.pdf", "instrument": "bb-trumpet", "parts": ["Trumpet 1", "Trumpet 2"], "sha256": "0000000000000000000000000000000000000000000000000000000000000000", "expected_measures": 64},
     {"pdf": "pdfs/example-tenor-sax.pdf", "instrument": "tenor-saxophone", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "expected_measures": 64}
   ]
 }

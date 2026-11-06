@@ -142,14 +142,15 @@ def _format_transposition(diatonic: str, chromatic: str) -> str:
 
 def _written_clef(score: ET.Element, part: ET.Element, inst: ET.Element) -> str:
     """The clef the part starts with, as written (transposing), as a MuseScore ClefType."""
-    staff = score.find("Staff")
+    part_staff = part.find("Staff")
+    staff_id = part_staff.get("id") if part_staff is not None else None
+    staff = next((s for s in score.findall("Staff") if s.get("id") == staff_id), None)
     measure = staff.find("Measure") if staff is not None else None
     clef = measure.find("voice/Clef") if measure is not None else None
     if clef is not None:
         for tag in ("transposingClefType", "concertClefType"):
             if (text := clef.findtext(tag)) is not None:
                 return text.strip()
-    part_staff = part.find("Staff")
     sources = []
     if part_staff is not None:
         sources.append((part_staff, ("defaultTransposingClef", "defaultClef")))
@@ -188,9 +189,13 @@ def _page_check(zf: zipfile.ZipFile, source: str, expected: PageSize) -> Check:
 
 
 def check_mscz(
-    path: Path, instrument: Instrument, *, page_size: PageSize = A5_LANDSCAPE
+    path: Path,
+    instrument: Instrument,
+    *,
+    page_size: PageSize = A5_LANDSCAPE,
+    parts: tuple[str, ...] | None = None,
 ) -> MscxCheckResult:
-    """Check a single-part .mscz against an instruments.json entry and the style page size.
+    """Check each configured part against an instrument entry and the style page size.
 
     Every check is reported, pass or fail. Raises MscxCheckError only when the file
     cannot be read at all.
@@ -206,28 +211,36 @@ def check_mscz(
         score = root.find("Score")
         if score is None:
             raise MscxCheckError(f"{source}:{mscx}: no <Score> under <{root.tag}>")
-        parts = score.findall("Part")
-        checks = [_check("part_count", len(parts), 1)]
-        part = parts[0] if parts else None
-        inst = part.find("Instrument") if part is not None else None
-        if part is None or inst is None:
-            missing = "no <Part>" if part is None else "no <Instrument>"
-            checks += [
-                Check("instrument", False, missing, instrument.id),
-                Check("part_name", False, missing, instrument.name_pt),
-                Check("transposition", False, missing, _transposition(instrument)),
-                Check("clef", False, missing, instrument.clef),
-            ]
-        else:
-            clef = _written_clef(score, part, inst)
-            found_transposition = _format_transposition(
-                _int_text(inst, "transposeDiatonic"), _int_text(inst, "transposeChromatic")
-            )
-            checks += [
-                _check("instrument", inst.get("id", ""), instrument.id),
-                _check("part_name", (inst.findtext("longName") or "").strip(), instrument.name_pt),
-                _check("transposition", found_transposition, _transposition(instrument)),
-                _check("clef", _CLEFS_BACK.get(clef, clef), instrument.clef),
-            ]
+        score_parts = score.findall("Part")
+        names = parts if parts is not None else (instrument.name_pt,)
+        checks = [_check("part_count", len(score_parts), len(names))]
+        for index, name in enumerate(names):
+            part = score_parts[index] if index < len(score_parts) else None
+            inst = part.find("Instrument") if part is not None else None
+            if part is None or inst is None:
+                missing = "no <Part>" if part is None else "no <Instrument>"
+                part_checks = [
+                    Check("instrument", False, missing, instrument.id),
+                    Check("part_name", False, missing, name),
+                    Check("transposition", False, missing, _transposition(instrument)),
+                    Check("clef", False, missing, instrument.clef),
+                ]
+            else:
+                clef = _written_clef(score, part, inst)
+                found_transposition = _format_transposition(
+                    _int_text(inst, "transposeDiatonic"), _int_text(inst, "transposeChromatic")
+                )
+                part_checks = [
+                    _check("instrument", inst.get("id", ""), instrument.id),
+                    _check("part_name", (inst.findtext("longName") or "").strip(), name),
+                    _check("transposition", found_transposition, _transposition(instrument)),
+                    _check("clef", _CLEFS_BACK.get(clef, clef), instrument.clef),
+                ]
+            if parts is not None:
+                part_checks = [
+                    Check(f"part[{index + 1}].{c.name}", c.passed, c.found, c.expected)
+                    for c in part_checks
+                ]
+            checks.extend(part_checks)
         checks.append(_page_check(zf, source, page_size))
     return MscxCheckResult(Path(path), mscx, tuple(checks))
