@@ -10,6 +10,7 @@ its duration: Audiveris reads every multi-measure rest as one bar, so the part l
 measures there. The length is reported as read, never guessed.
 """
 
+import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, replace
 from fractions import Fraction
@@ -251,3 +252,84 @@ def measure_durations(path: Path) -> DurationReport:
     measure, or is the last measure and completes the pickup.
     """
     return check_durations(read_musicxml(path))
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewSignal:
+    """A source-review warning, independent of rhythmic validity."""
+
+    code: str
+    detail: str
+    part_id: str = ""
+    measure: str = ""
+
+
+_NAVIGATION = re.compile(
+    r"(?<!\w)(?:d\s*\.?\s*[cs]\s*\.?(?!\w)|(?:al\s+)?fine\b|coda\b)",
+    re.IGNORECASE,
+)
+
+
+def check_review_signals(
+    root: ET.Element, expected_measures: int, expected_parts: int = 1
+) -> tuple[ReviewSignal, ...]:
+    """Check completeness, structural identity and navigation without changing notes.
+
+    Manifest part names are output labels, not evidence of recognized musical identity.
+    Only structural identity can be checked without a source-backed comparison.
+    """
+    signals = []
+    parts = root.findall("part")
+    if len(parts) != expected_parts:
+        signals.append(
+            ReviewSignal(
+                "part_count_mismatch", f"{len(parts)} part(s) read, {expected_parts} expected"
+            )
+        )
+    ids = [part.get("id", "") for part in parts]
+    declared = [part.get("id", "") for part in root.findall("part-list/score-part")]
+    if (
+        not all(ids)
+        or len(set(ids)) != len(ids)
+        or len(set(declared)) != len(declared)
+        or set(ids) != set(declared)
+    ):
+        signals.append(
+            ReviewSignal(
+                "part_identity", "part IDs must be unique and match the score-part declarations"
+            )
+        )
+    for part in parts:
+        pid = part.get("id", "")
+        measures = part.findall("measure")
+        if len(measures) != expected_measures:
+            signals.append(
+                ReviewSignal(
+                    "measure_count_mismatch",
+                    f"part {pid}: {len(measures)} measure(s) read, {expected_measures} expected; "
+                    "compare all systems with the source; missing or extra bars may occur anywhere",
+                    pid,
+                )
+            )
+        has_navigation = any(
+            direction.find(".//coda") is not None
+            or direction.find(".//segno") is not None
+            or any(_NAVIGATION.search(words.text or "") for words in direction.findall(".//words"))
+            or any(
+                key in sound.attrib
+                for sound in direction.findall(".//sound")
+                for key in ("dacapo", "dalsegno", "tocoda", "fine", "coda", "segno")
+            )
+            for direction in part.findall("measure/direction")
+        )
+        for measure in measures:
+            for lyric in measure.findall("note/lyric"):
+                text = " ".join(el.text or "" for el in lyric if el.tag in ("text", "elision"))
+                if _NAVIGATION.search(text):
+                    detail = f"navigation-like lyric {text!r}; verify against the source"
+                    if not has_navigation:
+                        detail += "; no navigation direction found in this part"
+                    signals.append(
+                        ReviewSignal("navigation_lyric", detail, pid, measure.get("number", ""))
+                    )
+    return tuple(signals)

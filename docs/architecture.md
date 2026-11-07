@@ -52,8 +52,8 @@ flowchart TB
 
 1. **Audiveris.** Runs `-batch -export` on the PDF. Checks the number of `.mxl` files produced, not just the exit code. Unzips and handles multiple movements.
 2. **XSD.** Validates the MusicXML against the local 4.0 XSD (xmllint). On failure, it goes to human review.
-3. **Duration per measure.** Lists measures that do not add up in `status.json`.
-4. **Instrument fix-up.** Applies `instruments.json` to the given instrument: `<transpose>`, clef, name, sound; removes the OMR page layout. Adds a rehearsal mark on suspect measures. Runs the XSD again.
+3. **Duration and review checks.** Lists measures that do not add up in `status.json`. Independently checks measure counts, part counts and structural IDs, and navigation-like lyrics. Signals set `review_required` without changing stage success. See README for codes, scope and limitations.
+4. **Instrument fix-up.** Applies `instruments.json` to the given instrument: `<transpose>`, clef, name, sound; removes the OMR page layout. Adds a rehearsal mark on suspect measures and explicit review text for count and navigation warnings. An unexpected part count still stops fixup before conversion. Runs the XSD again.
 5. **MuseScore.** Converts to `.mscz` with `-S "Estilo 2026.mss"`.
 6. **Final check on the `.mscx`.** Opens the `.mscz`, reads the `.mscx` and checks instrument, transposition, clef and the style's page size.
 

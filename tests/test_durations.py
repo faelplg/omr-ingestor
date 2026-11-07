@@ -1,3 +1,4 @@
+import xml.etree.ElementTree as ET
 from fractions import Fraction
 
 import pytest
@@ -218,3 +219,70 @@ def test_part_without_multi_measure_rests_gets_no_new_suspects():
 def test_unusable_input_fails_clearly(xml, match):
     with pytest.raises(MusicXMLError, match=match):
         check_durations(parse_musicxml(xml))
+
+
+@pytest.mark.parametrize("expected", [1, 3])
+def test_count_review_is_independent_of_valid_durations(expected):
+    from omr_ingestor.durations import check_review_signals
+
+    root = ET.fromstring(score({"P1": [measure(1, DEFAULT_ATTRS + note(4)), measure(2, note(4))]}))
+    assert not check_durations(root).suspects
+    signals = check_review_signals(root, expected)
+    assert [s.code for s in signals] == ["measure_count_mismatch"]
+    assert signals[0].measure == ""
+    assert "anywhere" in signals[0].detail
+    assert not check_review_signals(root, 2)
+
+
+def test_part_count_and_structural_identity_review():
+    from omr_ingestor.durations import check_review_signals
+
+    root = ET.fromstring(
+        score({f"P{i}": [measure(1, DEFAULT_ATTRS + rest(4, measure=True))] for i in range(6)})
+    )
+    assert not check_durations(root).suspects
+    assert [s.code for s in check_review_signals(root, 1, 2)] == ["part_count_mismatch"]
+    assert not check_review_signals(root, 1, 6)
+    root.findall("part")[1].set("id", "P0")
+    assert "part_identity" in [s.code for s in check_review_signals(root, 1, 6)]
+
+
+@pytest.mark.parametrize("text", ["D.C.", "D.S.", "Fine", "Coda", "al Fine", "D. C. al Fine"])
+@pytest.mark.parametrize("direction", [False, True])
+def test_navigation_lyrics_require_review_even_with_directions(text, direction):
+    from omr_ingestor.durations import check_review_signals
+
+    nav = '<direction><sound dacapo="yes"/></direction>' if direction else ""
+    lyric = f"<lyric><text>{text}</text></lyric>"
+    root = ET.fromstring(score({"P1": [measure(1, DEFAULT_ATTRS + nav + note(4, extra=lyric))]}))
+    before = ET.tostring(root)
+    signals = check_review_signals(root, 1)
+    assert len(signals) == 1
+    assert signals[0].code == "navigation_lyric"
+    assert signals[0].part_id == "P1" and signals[0].measure == "1"
+    assert ("no navigation direction" in signals[0].detail) is not direction
+    assert ET.tostring(root) == before
+
+
+def test_navigation_matching_avoids_word_fragments_and_joins_lyric_text():
+    from omr_ingestor.durations import check_review_signals
+
+    root = ET.fromstring(
+        score(
+            {
+                "P1": [
+                    measure(
+                        1,
+                        DEFAULT_ATTRS
+                        + note(4, extra="<lyric><text>finally codas decode</text></lyric>"),
+                    )
+                ]
+            }
+        )
+    )
+    assert not check_review_signals(root, 1)
+    lyric = root.find("part/measure/note/lyric")
+    lyric.clear()
+    ET.SubElement(lyric, "text").text = "D."
+    ET.SubElement(lyric, "text").text = "C."
+    assert check_review_signals(root, 1)[0].code == "navigation_lyric"

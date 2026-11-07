@@ -93,7 +93,7 @@ def test_all_items_pass_and_agree(batch: Batch, capsys):
         assert status.instrument == instrument
         assert (batch.output / stem / f"{stem}.mscz").exists()
     summary = batch.summary()
-    assert summary["schema_version"] == 2
+    assert summary["schema_version"] == 3
     assert summary["passed"] is True
     assert [it["stem"] for it in summary["items"]] == list(PARTS)
     assert summary["items"][0] == {
@@ -105,6 +105,8 @@ def test_all_items_pass_and_agree(batch: Batch, capsys):
         "error": None,
         "measures": {"read": 3, "expected": 3, "missing": 0},
         "suspect_count": 1,
+        "review_required": True,
+        "review_signals": [],
         "status_file": "song-trumpet/status.json",
         "tool_versions": {"audiveris": "5.11.0", "musescore": "4.7.5"},
         "audiveris_options": {},
@@ -119,7 +121,11 @@ def test_all_items_pass_and_agree(batch: Batch, capsys):
     }
     out, err = capsys.readouterr()
     assert "[3/3] song-flute: passed" in out
-    assert "song-trombone  trombone    passed     3         3        0         1" in out
+    assert any(
+        line.split()
+        == ["song-trombone", "trombone", "passed", "(review", "required)", "3", "3", "0", "1"]
+        for line in out.splitlines()
+    )
     assert "cross-part: all 3 part(s) read 3 measure(s)" in out
     assert err == ""
 
@@ -146,7 +152,10 @@ def test_a_failing_item_does_not_stop_the_others(batch: Batch, capsys):
 
     out, err = capsys.readouterr()
     assert "[1/3] song-trumpet: failed at audiveris:" in out
-    assert "song-trumpet   bb-trumpet  failed (audiveris)     -         3        -         -" in out
+    assert any(
+        line.split() == ["song-trumpet", "bb-trumpet", "failed", "(audiveris)", "-", "3", "-", "-"]
+        for line in out.splitlines()
+    )
     assert "error: 2 of 3 item(s) did not pass: song-trumpet, song-trombone" in err
     assert (
         "warning: measures not counted (failed before durations): song-trumpet, song-trombone"

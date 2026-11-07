@@ -1,6 +1,7 @@
 import hashlib
 import json
 import shutil
+import xml.etree.ElementTree as ET
 import zipfile
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -482,7 +483,10 @@ def test_two_parts_fixup_and_final_check(setup, monkeypatch):
         p.findtext("score-instrument/instrument-sound")
         for p in fixed.findall("part-list/score-part")
     ] == ["brass.trumpet.bflat"] * 2
-    assert fixed.find("part[@id='P1']/measure/direction") is None
+    assert fixed.find("part[@id='P1']/measure/direction/direction-type/rehearsal") is None
+    assert "2 measure(s) read, 3 expected" in fixed.findtext(
+        "part[@id='P1']/measure/direction/direction-type/words"
+    )
     mark = "part[@id='P2']/measure[@number='2']/direction/direction-type/rehearsal"
     assert fixed.findtext(mark) == "?"
     status = setup.status()
@@ -503,6 +507,8 @@ def test_multipart_count_mismatch_fails_before_writing(setup, monkeypatch, parts
     status = setup.status()
     assert status.stage("fixup").status.value == "failed"
     assert "score has 2 parts" in status.stage("fixup").detail
+    assert status.review_required
+    assert "part_count_mismatch" in [s.code for s in status.review_signals]
     if parts is not None:
         assert f"manifest parts expects {len(parts)}" in status.stage("fixup").detail
     else:
@@ -587,3 +593,43 @@ def test_batch_multipart_without_configuration_reports_missing_parts(
     )
     assert "parts read different measure counts" not in warnings
     assert "failed before durations" not in warnings
+
+
+def test_review_signals_reach_status_batch_cli_and_score(setup, monkeypatch, capsys):
+    from omr_ingestor.batch import run_batch
+    from omr_ingestor.cli import _print_batch
+
+    xml = score(
+        {
+            "P1": [
+                measure(
+                    1, DEFAULT_ATTRS + note(4, extra="<lyric><text>D.C. al Fine</text></lyric>")
+                ),
+                measure(2, note(4)),
+            ]
+        }
+    )
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [xml])))
+    result = run_batch(setup.manifest, setup.output)
+    assert result.ok
+    status = setup.status()
+    assert not status.suspect_measures
+    assert status.review_required
+    assert [s.code for s in status.review_signals] == ["measure_count_mismatch", "navigation_lyric"]
+    assert result.items[0].review_required
+    assert result.items[0].review_signals == status.review_signals
+    summary = json.loads(result.summary_file.read_text())
+    assert summary["items"][0]["review_required"] is True
+    assert summary["items"][0]["review_signals"] == status.to_dict()["review_signals"]
+    fixed = read_musicxml(setup.item_dir / f"{STEM}.musicxml")
+    words = [el.text for el in fixed.findall("part/measure/direction/direction-type/words")]
+    assert any("2 measure(s) read, 3 expected" in w for w in words)
+    assert any("navigation-like lyric" in w for w in words)
+    raw = read_musicxml(setup.item_dir / "audiveris" / f"{STEM}.musicxml")
+    assert [ET.tostring(n) for n in fixed.findall("part/measure/note")] == [
+        ET.tostring(n) for n in raw.findall("part/measure/note")
+    ]
+    _print_batch(result)
+    assert "navigation_lyric" in capsys.readouterr().err
+    assert setup.run() == 0
+    assert "review required: true" in capsys.readouterr().out

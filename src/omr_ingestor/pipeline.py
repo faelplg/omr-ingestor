@@ -31,7 +31,7 @@ from typing import Any
 
 from omr_ingestor import mscx_check, musescore
 from omr_ingestor.audiveris import AudiverisError, resolve_audiveris, run_audiveris
-from omr_ingestor.durations import DurationReport, check_durations
+from omr_ingestor.durations import DurationReport, check_durations, check_review_signals
 from omr_ingestor.fixup import fix_instrument
 from omr_ingestor.instruments import Instrument, InstrumentsError, load_instruments
 from omr_ingestor.manifest import ManifestError, load_manifest
@@ -287,6 +287,9 @@ def _durations(ctx: _Context) -> str:
     ctx.status = replace(
         ctx.status,
         suspect_measures=tuple(SuspectMeasure(m.number, m.describe()) for m in suspects),
+        review_signals=check_review_signals(
+            root, ctx.status.expected_measures, len(ctx.parts) if ctx.parts is not None else 1
+        ),
         measures_read=counts[0]
         if len(counts) == 1 or (ctx.parts is not None and len(set(counts)) == 1)
         else None,
@@ -357,6 +360,30 @@ def _fixup(ctx: _Context) -> str:
             f"{ctx.instrument.id} applied to part {part_id}, {len(result.marked)} mark(s)"
         )
         details.extend(prefix + r.describe() for r in result.rewrites)
+    # Count warnings belong to the whole part, so anchor them at its first bar.
+    # The annotation deliberately makes no claim about where recognition lost content.
+    for signal in ctx.status.review_signals:
+        for part in parts:
+            if signal.part_id and signal.part_id != part.get("id", ""):
+                continue
+            measures = part.findall("measure")
+            target_measure = (
+                next((m for m in measures if m.get("number", "") == signal.measure), None)
+                if signal.measure
+                else next(iter(measures), None)
+            )
+            if target_measure is not None:
+                direction = ET.Element("direction", placement="above")
+                ET.SubElement(ET.SubElement(direction, "direction-type"), "words").text = (
+                    "Review: " + signal.detail
+                )
+                at = 0
+                while at < len(target_measure) and target_measure[at].tag in (
+                    "print",
+                    "attributes",
+                ):
+                    at += 1
+                target_measure.insert(at, direction)
     target = ctx.paths.musicxml
     tmp = target.with_name(f".{target.name}.tmp")
     try:
