@@ -12,62 +12,18 @@ from omr_ingestor.fixup import (
 )
 from omr_ingestor.instruments import load_instruments
 from omr_ingestor.musicxml import MusicXMLError, parse_musicxml, read_musicxml
-from tests.musicxml_builders import barline, measure, note, score
+from tests.musicxml_builders import (
+    Q,
+    measure,
+    note,
+    omr_score,
+    score,
+    start,
+    stop,
+    volta_score,
+)
 
 INSTRUMENTS = load_instruments()
-
-OMR_HEADER = (
-    "<defaults><scaling><millimeters>7</millimeters><tenths>40</tenths></scaling>"
-    "<page-layout><page-height>1700</page-height><page-width>1200</page-width></page-layout>"
-    "<system-layout><system-distance>120</system-distance></system-layout>"
-    "<staff-layout><staff-distance>60</staff-distance></staff-layout></defaults>"
-)
-OMR_SCORE_PART = (
-    '<score-part id="P1"><part-name>Voice</part-name>'
-    "<part-name-display><display-text>Voice</display-text></part-name-display>"
-    "<part-abbreviation>Pno.</part-abbreviation>"
-    "<part-abbreviation-display><display-text>Pno.</display-text></part-abbreviation-display>"
-    '<score-instrument id="P1-I1"><instrument-name>Piano</instrument-name></score-instrument>'
-    '<score-instrument id="P1-I2"><instrument-name>Organ</instrument-name></score-instrument>'
-    '<midi-instrument id="P1-I1"><midi-channel>3</midi-channel>'
-    "<midi-program>1</midi-program><volume>80</volume></midi-instrument>"
-    "</score-part>"
-)
-FIRST_ATTRS = (
-    "<attributes><divisions>1</divisions><key><fifths>0</fifths></key>"
-    "<time><beats>4</beats><beat-type>4</beat-type></time>"
-    "<clef><sign>F</sign><line>4</line></clef>"
-    "<transpose><diatonic>0</diatonic><chromatic>-12</chromatic></transpose></attributes>"
-)
-PRINT = (
-    '<print new-system="yes"><system-layout>'
-    "<system-distance>90</system-distance></system-layout></print>"
-)
-C_CLEF = "<attributes><clef><sign>C</sign><line>4</line></clef></attributes>"
-Q = note(1)
-I2_NOTE = note(1, extra='<instrument id="P1-I2"/>')
-# Mid-part switches to P1-I2: a standalone <sound> and one inside a <direction>.
-SWITCH_TO_I2 = (
-    '<sound><midi-instrument id="P1-I2"><midi-program>20</midi-program></midi-instrument></sound>'
-    '<direction><direction-type><words>Organ</words></direction-type><sound tempo="90">'
-    '<instrument-change id="P1-I2"><instrument-sound>keyboard.organ</instrument-sound>'
-    '</instrument-change><midi-instrument id="P1-I2"><midi-program>20</midi-program>'
-    "</midi-instrument></sound></direction>"
-)
-
-
-def omr_score() -> str:
-    return score(
-        {
-            "P1": [
-                measure(1, PRINT + FIRST_ATTRS + Q * 4, attrs=' width="300"'),
-                measure(2, Q * 3, attrs=' width="250"'),
-                measure(3, PRINT + C_CLEF + SWITCH_TO_I2 + I2_NOTE * 4),
-            ]
-        },
-        header=OMR_HEADER,
-        score_parts=OMR_SCORE_PART,
-    )
 
 
 def fixed(instrument_id: str, **kwargs) -> ET.Element:
@@ -212,21 +168,6 @@ def test_fix_instrument_file_round_trip(tmp_path):
     root = read_musicxml(dst)
     assert root.findtext(".//transpose/chromatic") == "-2"
     assert root.findtext(".//rehearsal") == "?"
-
-
-def start(number: str, **kwargs) -> str:
-    return barline("left", ending=(number, "start"), **kwargs)
-
-
-def stop(number: str, kind: str = "stop", *, repeat: bool = False, **kwargs) -> str:
-    return barline("right", ending=(number, kind), repeat="backward" if repeat else None, **kwargs)
-
-
-def volta_score(*bodies: str) -> str:
-    """Measure 1, then measure i + 2 with four quarters and the barlines in bodies[i]."""
-    ms = [measure(1, FIRST_ATTRS + Q * 4)]
-    ms += [measure(i, Q * 4 + body) for i, body in enumerate(bodies, 2)]
-    return score({"P1": ms}, score_parts=OMR_SCORE_PART)
 
 
 def volta_part(*bodies: str) -> ET.Element:

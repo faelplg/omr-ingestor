@@ -8,77 +8,7 @@ import pytest
 from omr_ingestor.fixup import TEXT_REMOVAL_CATEGORIES, strip_text
 from omr_ingestor.musicxml import parse_musicxml, write_musicxml
 from omr_ingestor.xsd import validate_xsd
-from tests.musicxml_builders import DEFAULT_ATTRS, measure, score
-
-HEADER = (
-    "<work><work-number>1</work-number><work-title>Title</work-title></work>"
-    "<movement-number>2</movement-number><movement-title>Movement</movement-title>"
-    '<identification><creator type="composer">Composer</creator><rights>Rights</rights>'
-    "<encoding><software>Synthetic</software></encoding><source>Source</source>"
-    '<relation>Related work</relation><miscellaneous><miscellaneous-field name="x">'
-    "Header</miscellaneous-field></miscellaneous></identification>"
-    "<credit><credit-words>Credit</credit-words></credit>"
-)
-TECHNICAL = (
-    "<fingering>1</fingering><pluck>p</pluck><fret>3</fret><string>1</string>"
-    '<hammer-on type="start">H</hammer-on><pull-off type="stop">P</pull-off>'
-    "<tap>T</tap><other-technical>Text</other-technical>"
-)
-NOTE = (
-    "<note><pitch><step>C</step><alter>1</alter><octave>4</octave></pitch>"
-    '<duration>4</duration><tie type="start"/><type>whole</type><accidental>sharp</accidental>'
-    "<time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes>"
-    '</time-modification><notations><tied type="start"/><slur type="start"/>'
-    '<tuplet type="start"/><articulations><staccato/></articulations>'
-    "<technical><up-bow/>" + TECHNICAL + "</technical><dynamics><f/></dynamics></notations>"
-    "<lyric><text>D.C. al Fine</text></lyric></note>"
-)
-DIRECTIONS = (
-    "<direction><direction-type><words>Free text</words></direction-type></direction>"
-    "<direction><direction-type><rehearsal>A</rehearsal></direction-type></direction>"
-    "<direction><direction-type><words>D.C.</words></direction-type>"
-    '<offset>2</offset><sound dacapo="yes"/></direction>'
-    '<direction><direction-type><segno/></direction-type><sound segno="s"/></direction>'
-    '<direction><direction-type><coda/></direction-type><sound coda="c"/></direction>'
-    "<direction><direction-type><words>Loud</words></direction-type>"
-    "<direction-type><dynamics><ff/></dynamics></direction-type></direction>"
-)
-
-
-def synthetic_score():
-    attrs = DEFAULT_ATTRS.replace("<time>", "<key><fifths>2</fifths></key><time>").replace(
-        "</attributes>", "<clef><sign>G</sign><line>2</line></clef></attributes>"
-    )
-    score_parts = "".join(
-        f'<score-part id="{p}"><part-name>Trumpet {p}</part-name>'
-        f'<score-instrument id="{p}-I1"><instrument-name>Trumpet</instrument-name>'
-        "<instrument-sound>brass.trumpet</instrument-sound></score-instrument>"
-        f'<midi-instrument id="{p}-I1"><midi-channel>1</midi-channel>'
-        "<midi-program>57</midi-program></midi-instrument></score-part>"
-        for p in ("P1", "P2")
-    )
-    return parse_musicxml(
-        score(
-            {
-                p: [
-                    measure(
-                        1,
-                        attrs
-                        + DIRECTIONS
-                        + NOTE
-                        + (
-                            "<note><rest/><duration>1</duration></note>"
-                            '<barline location="right"><ending number="1" type="start"/>'
-                            '<repeat direction="backward"/></barline>'
-                        ),
-                    )
-                ]
-                for p in ("P1", "P2")
-            },
-            header=HEADER,
-            score_parts=score_parts,
-        )
-    )
+from tests.musicxml_builders import measure, score, synthetic_score
 
 
 def xml(el):
@@ -88,7 +18,7 @@ def xml(el):
 def test_all_categories_are_removed_in_every_part_and_counted():
     root = synthetic_score()
     assert strip_text(root) == dict(
-        credits=1, headers=8, lyrics=2, words=6, rehearsals=2, technical=16
+        credits=1, headers=8, lyrics=2, words=6, rehearsals=2, technical=6
     )
     for tag in (
         "credit",
@@ -101,18 +31,13 @@ def test_all_categories_are_removed_in_every_part_and_counted():
         "relation",
         "miscellaneous",
         "lyric",
-        "words",
         "rehearsal",
         "fingering",
         "pluck",
-        "fret",
-        "string",
-        "hammer-on",
-        "pull-off",
-        "tap",
         "other-technical",
     ):
         assert root.find(".//" + tag) is None, tag
+    assert [w.text for w in root.iter("words")] == ["D.C.", "D.S. al Coda", "To Coda"] * 2
     assert root.findtext("identification/encoding/software") == "Synthetic"
     once = xml(root)
     assert strip_text(root) == dict.fromkeys(TEXT_REMOVAL_CATEGORIES, 0)
@@ -145,6 +70,13 @@ def test_all_categories_are_removed_in_every_part_and_counted():
         ".//segno",
         ".//coda",
         ".//up-bow",
+        ".//fret",
+        ".//string",
+        ".//hammer-on",
+        ".//pull-off",
+        ".//tap",
+        ".//symbol",
+        ".//sound",
     ],
 )
 def test_musical_content_survives_exactly(path):
@@ -163,34 +95,58 @@ def test_keep_text_preserves_the_entire_document():
 
 
 @pytest.mark.parametrize(
-    "offset,sound,expected",
+    "attribute,text",
     [
-        ("<offset>3</offset>", '<sound dacapo="yes"/>', "3"),
-        ('<offset sound="no">3</offset>', '<sound dacapo="yes"/>', None),
-        ("<offset>3</offset>", '<sound dacapo="yes"><offset>5</offset></sound>', "5"),
+        ("dacapo", "D.C. al Fine"),
+        ("dalsegno", "D.S. al Coda"),
+        ("fine", "Fine"),
+        ("tocoda", "To Coda"),
+        ("coda", "Coda"),
+        ("segno", "Segno"),
     ],
 )
-def test_text_only_direction_keeps_sound_and_playback_offset(offset, sound, expected):
+@pytest.mark.parametrize("offset", ["<offset>3</offset>", '<offset sound="yes">3</offset>'])
+def test_navigation_direction_stays_unchanged(attribute, text, offset):
+    direction = (
+        '<direction placement="above"><direction-type><words>'
+        + text
+        + "</words></direction-type>"
+        + offset
+        + "<voice>1</voice><staff>1</staff>"
+        + f'<sound {attribute}="yes"/></direction>'
+    )
+    root = parse_musicxml(score({"P1": [measure(1, direction)]}))
+    before = xml(root)
+    assert strip_text(root)["words"] == 0
+    assert xml(root) == before
+
+
+def test_ds_al_coda_and_to_coda_stay_unchanged_together():
+    root = synthetic_score()
+    before = [xml(d) for d in root.findall(".//direction") if d.find("sound") is not None]
+    strip_text(root)
+    assert [xml(d) for d in root.findall(".//direction") if d.find("sound") is not None] == before
+    assert [w.text for w in root.iter("words")] == ["D.C.", "D.S. al Coda", "To Coda"] * 2
+
+
+def test_words_and_symbol_direction_keeps_its_symbol():
     root = parse_musicxml(
         score(
             {
                 "P1": [
                     measure(
                         1,
-                        "<direction><direction-type><words>D.C.</words></direction-type>"
-                        + offset
-                        + sound
-                        + "</direction>",
+                        "<direction><direction-type><words>solo</words>"
+                        "<symbol>coda</symbol></direction-type></direction>",
                     )
                 ]
             }
         )
     )
-    strip_text(root)
-    assert root.find(".//direction") is None
-    snd = root.find("part/measure/sound")
-    assert snd is not None and snd.get("dacapo") == "yes"
-    assert snd.findtext("offset") == expected
+    assert strip_text(root)["words"] == 1
+    assert xml(root.find(".//direction")) == (
+        b"<direction><direction-type><symbol>coda</symbol></direction-type></direction>"
+    )
 
 
 def test_empty_wrappers_are_removed_but_mixed_notations_survive():

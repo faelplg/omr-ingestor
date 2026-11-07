@@ -13,10 +13,9 @@ from omr_ingestor.musescore import MUSESCORE_ENV_VAR
 from omr_ingestor.pipeline import UncountedReason
 from omr_ingestor.status import read_status
 from omr_ingestor.xsd import XSD_ENV_VAR
-from tests.musicxml_builders import DEFAULT_ATTRS, measure, note, score
-from tests.test_fixup import omr_score
-from tests.test_mscx_check import instrument_mscx, style_xml
-from tests.test_pipeline import ANY_SCORE_XSD, fake_audiveris, fake_musescore
+from tests.fake_tools import ANY_SCORE_XSD, fake_audiveris, fake_musescore
+from tests.mscx_builders import instrument_mscx, style_xml
+from tests.musicxml_builders import DEFAULT_ATTRS, measure, note, omr_score, score
 
 pytestmark = pytest.mark.skipif(shutil.which("xmllint") is None, reason="xmllint not installed")
 

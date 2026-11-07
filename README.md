@@ -87,10 +87,14 @@ readable with an empty signal list; only a rerun performs the new checks.
 By default, fixup removes credits, work and movement headers, identification text
 (creators, rights, source, relations and miscellaneous fields), lyrics, free text
 `words`, original rehearsal marks, and text-like technical marks (`fingering`,
-`pluck`, `fret`, `string`, `hammer-on`, `pull-off`, `tap`, `other-technical`).
+`pluck`, `other-technical`). Fret and string positions, hammer-ons, pull-offs and
+tapping techniques remain.
 Encoding metadata, part names and instrument data remain. Clefs, signatures, notes,
 rests, accidentals, articulations, ties, slurs, tuplets, dynamics, barlines, repeats,
 voltas and navigation (`sound`, segno and coda) retain their musical content.
+The whole direction, including text and positioning, is kept when its `sound`
+has `dacapo`, `dalsegno`, `fine`, `tocoda`, `coda` or `segno`. Other words, such as
+tempo text, "rit." and "solo", are removed.
 Instrument and volta fixes still apply as described above.
 
 Set `"keep_text": true` on an individual manifest item to keep its original text.
