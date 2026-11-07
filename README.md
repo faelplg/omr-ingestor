@@ -58,6 +58,9 @@ of stage success and duration suspects. Each signal contains `code`, `detail`,
 - `part_identity`: part IDs must be unique and match the score-part declarations.
   Manifest names are assigned output labels, so these checks cannot establish
   musical identity or detect swapped voices with otherwise valid structure.
+  An identity mismatch fails the durations stage after recording the signal;
+  fixup and conversion are skipped to prevent transforming an ambiguous part.
+  Correct the MusicXML part IDs or rerun OMR before attempting instrument fixup.
 - `navigation_lyric`: lyric text resembling D.C., D.S., Fine, Fim, Coda or al Fine
   requires review, including when navigation directions already exist. Its detail
   also reports when the part has no navigation direction (words, symbols or sound

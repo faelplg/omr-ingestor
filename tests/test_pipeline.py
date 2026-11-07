@@ -14,7 +14,12 @@ from omr_ingestor.durations import check_review_signals
 from omr_ingestor.instruments import load_instruments
 from omr_ingestor.musescore import MUSESCORE_ENV_VAR
 from omr_ingestor.musicxml import read_musicxml
-from omr_ingestor.pipeline import PipelineSetupError, run_item, select_item
+from omr_ingestor.pipeline import (
+    PipelineSetupError,
+    _annotate_review_signals,
+    run_item,
+    select_item,
+)
 from omr_ingestor.status import STAGE_NAMES, MeasureCount, read_status, write_status
 from omr_ingestor.xsd import XSD_ENV_VAR
 from tests.fake_tools import make_tool
@@ -657,8 +662,6 @@ def test_clean_item_has_no_review_signals(setup, monkeypatch, multipart):
 
 
 def test_score_wide_annotation_appears_once_with_duplicate_part_ids():
-    from omr_ingestor.pipeline import _annotate_review_signals
-
     root = ET.fromstring(
         score({pid: [measure(1, DEFAULT_ATTRS + note(4))] for pid in ["P1", "P2"]})
     )
@@ -672,3 +675,32 @@ def test_score_wide_annotation_appears_once_with_duplicate_part_ids():
         == "Review: " + signals[0].detail
     )
     assert not parts[1].findall("measure/direction")
+
+
+def test_duplicate_part_ids_stop_before_fixup_and_save_signal(setup, monkeypatch, capsys):
+    configure_parts(setup, ["Trumpet 1", "Trumpet 2"])
+    xml = score(
+        {
+            pid: [measure(n, (DEFAULT_ATTRS if n == 1 else "") + note(4)) for n in range(1, 4)]
+            for pid in ("P1", "P2")
+        }
+    ).replace('id="P2"', 'id="P1"')
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [xml])))
+
+    def forbidden_fixup(*args, **kwargs):
+        pytest.fail("instrument fixup must not run with ambiguous part IDs")
+
+    monkeypatch.setattr("omr_ingestor.pipeline.fix_instrument", forbidden_fixup)
+    assert setup.run() == 1
+    status = setup.status()
+    assert [signal.code for signal in status.review_signals] == ["part_identity"]
+    assert status.review_required
+    assert status.stage("durations").status == "failed"
+    assert status.stage("fixup").status == "skipped"
+    assert status.stage("musescore").status == "skipped"
+    error = capsys.readouterr().err
+    assert "part IDs" in error and "unique" in error
+    assert "before instrument fixup" in error
+    assert not (setup.item_dir / f"{STEM}.musicxml").exists()
+    assert not list(setup.item_dir.glob("*.mscz"))
+    assert not (setup.bin / "mscore.args").exists()

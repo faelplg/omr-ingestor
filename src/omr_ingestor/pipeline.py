@@ -307,6 +307,11 @@ def _durations(ctx: _Context) -> str:
         ctx.uncounted_reason = UncountedReason.MISSING_PARTS
     else:
         ctx.uncounted_reason = UncountedReason.DIFFERENT_COUNTS
+    if any(signal.code == "part_identity" for signal in ctx.status.review_signals):
+        raise StageError(
+            "unsafe part identity: part IDs must be unique and match the score-part "
+            "declarations; correct the MusicXML part IDs or rerun OMR before instrument fixup"
+        )
     expected = ctx.status.expected_measures
     read = "/".join(map(str, counts)) or "0"
     if ctx.parts is not None:
