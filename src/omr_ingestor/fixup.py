@@ -11,6 +11,7 @@ each repair gets a rehearsal mark too, so the human review looks at it.
 import itertools
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -209,6 +210,78 @@ def remove_page_layout(root: ET.Element) -> None:
     for measure in root.iterfind("part/measure"):
         _remove_all(measure, "print")
         measure.attrib.pop("width", None)
+
+
+# Counts refer to removed elements, not their descendant nodes or empty wrappers.
+TEXT_REMOVAL_CATEGORIES = ("credits", "headers", "lyrics", "words", "rehearsals", "technical")
+_TEXT_TECHNICAL = (
+    "fingering",
+    "pluck",
+    "fret",
+    "string",
+    "hammer-on",
+    "pull-off",
+    "tap",
+    "other-technical",
+)
+
+
+def strip_text(root: ET.Element, *, keep_text: bool = False) -> dict[str, int]:
+    """Clean a raw export before adding our review annotations or applying instruments.
+
+    Apply once to the whole score, including every part. Musical symbols and sound
+    navigation survive; a direction left with only sound becomes a standalone sound
+    at the same position, with its effective playback offset.
+    """
+    counts = dict.fromkeys(TEXT_REMOVAL_CATEGORIES, 0)
+    if keep_text:
+        return counts
+
+    def remove(parent: ET.Element, tag: str, category: str) -> None:
+        for child in parent.findall(tag):
+            parent.remove(child)
+            counts[category] += 1
+
+    remove(root, "credit", "credits")
+    for tag in ("work", "movement-number", "movement-title"):
+        remove(root, tag, "headers")
+    for identification in root.findall("identification"):
+        for tag in ("creator", "rights", "source", "relation", "miscellaneous"):
+            remove(identification, tag, "headers")
+        if not len(identification):
+            root.remove(identification)
+    for note in root.iter("note"):
+        remove(note, "lyric", "lyrics")
+        for notations in note.findall("notations"):
+            removed_before = counts["technical"]
+            for technical in notations.findall("technical"):
+                had_children = bool(len(technical))
+                for tag in _TEXT_TECHNICAL:
+                    remove(technical, tag, "technical")
+                if had_children and not len(technical):
+                    notations.remove(technical)
+            if counts["technical"] > removed_before and not len(notations):
+                note.remove(notations)
+    for measure in root.iterfind("part/measure"):
+        for direction in measure.findall("direction"):
+            for kind in direction.findall("direction-type"):
+                remove(kind, "words", "words")
+                remove(kind, "rehearsal", "rehearsals")
+                if not len(kind):
+                    direction.remove(kind)
+            if direction.find("direction-type") is None:
+                sound = direction.find("sound")
+                if sound is not None:
+                    offset = direction.find("offset")
+                    if (
+                        sound.find("offset") is None
+                        and offset is not None
+                        and offset.get("sound", "yes") != "no"
+                    ):
+                        sound.append(deepcopy(offset))
+                    measure.insert(list(measure).index(direction), sound)
+                measure.remove(direction)
+    return counts
 
 
 def _has_mark(measure: ET.Element, text: str) -> bool:

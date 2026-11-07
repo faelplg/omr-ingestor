@@ -111,3 +111,12 @@ def test_cli_validate(capsys, example, write_json):
 def test_invalid_parts_are_rejected(example, parts):
     example["items"][0]["parts"] = parts
     assert any("parts" in p for p in problems_of(example))
+
+
+@pytest.mark.parametrize("value", [True, False, "true", 1, None])
+def test_keep_text_requires_a_boolean(example, value):
+    example["items"][0]["keep_text"] = value
+    if isinstance(value, bool):
+        validate_manifest(example)
+    else:
+        assert any("keep_text" in p for p in problems_of(example))

@@ -65,12 +65,14 @@ def test_measure_count_records_missing_and_extra_measures():
     assert sample(measures_read=62).measure_count.missing == -2
 
 
-@pytest.mark.parametrize("version", [1, 2, 3])
+@pytest.mark.parametrize("version", [1, 2, 3, 4])
 def test_reads_legacy_schema_versions_and_preserves_review(tmp_path, version):
     path = tmp_path / "status.json"
     data = sample().to_dict()
-    del data["review_signals"]
-    del data["review_required"]
+    del data["text_removals"]
+    if version < 4:
+        del data["review_signals"]
+        del data["review_required"]
     if version < 3:
         del data["audiveris_options"]
     if version == 1:
@@ -84,7 +86,7 @@ def test_reads_legacy_schema_versions_and_preserves_review(tmp_path, version):
     assert read_status(path) == expected
     write_status(read_status(path), path)
     assert read_status(path) == expected
-    assert json.loads(path.read_text())["schema_version"] == 4
+    assert json.loads(path.read_text())["schema_version"] == 5
 
 
 def test_audiveris_options_round_trip(tmp_path):
@@ -109,6 +111,7 @@ def test_stable_key_order_and_bytes(tmp_path):
         "schema_version",
         "review_required",
         "review_signals",
+        "text_removals",
         "pdf",
         "instrument",
         "expected_measures",
@@ -193,7 +196,7 @@ def test_invalid_values_raise(make, message):
     ("edit", "message"),
     [
         (lambda d: d["acceptance"].update(accepted=False), "does not match"),
-        (lambda d: d.update(schema_version=5), "schema_version"),
+        (lambda d: d.update(schema_version=6), "schema_version"),
         (lambda d: d.pop("audiveris_options"), "keys"),
         (lambda d: d.update(audiveris_options=[]), "audiveris_options"),
         (lambda d: d.update(audiveris_options={"constant": 600}), "audiveris_options"),
@@ -251,3 +254,28 @@ def test_signal_file_with_missing_key_is_rejected(tmp_path):
     path.write_text(json.dumps(data))
     with pytest.raises(StatusError, match="review_signals"):
         read_status(path)
+
+
+@pytest.mark.parametrize(
+    "counts",
+    [
+        {},
+        {"lyrics": 1},
+        dict(credits=0, headers=0, lyrics=-1, words=0, rehearsals=0, technical=0),
+        dict(credits=0, headers=0, lyrics=True, words=0, rehearsals=0, technical=0),
+        dict(credits=0, headers=0, lyrics=1.5, words=0, rehearsals=0, technical=0),
+    ],
+)
+def test_invalid_text_removals_are_rejected(counts):
+    data = sample().to_dict()
+    data["text_removals"] = counts
+    with pytest.raises(StatusError, match="text_removals"):
+        ItemStatus.from_dict(data)
+
+
+def test_text_removals_round_trip(tmp_path):
+    counts = dict(credits=1, headers=2, lyrics=3, words=4, rehearsals=5, technical=6)
+    item = sample(text_removals=counts)
+    path = tmp_path / "status.json"
+    write_status(item, path)
+    assert read_status(path) == item

@@ -633,9 +633,15 @@ def test_review_signals_reach_status_batch_cli_and_score(setup, monkeypatch, cap
     assert any("navigation-like lyric" in w for w in words)
     assert words == ["Review: " + signal.detail for signal in status.review_signals]
     raw = read_musicxml(setup.item_dir / "audiveris" / f"{STEM}.musicxml")
+    assert fixed.find(".//lyric") is None
+    assert raw.find(".//lyric") is not None
+    for raw_note in raw.findall(".//note"):
+        for lyric in raw_note.findall("lyric"):
+            raw_note.remove(lyric)
     assert [ET.tostring(n) for n in fixed.findall("part/measure/note")] == [
         ET.tostring(n) for n in raw.findall("part/measure/note")
     ]
+    assert status.text_removals["lyrics"] == 1
     _print_batch(result)
     assert "navigation_lyric" in capsys.readouterr().err
     assert setup.run() == 0
@@ -704,3 +710,33 @@ def test_duplicate_part_ids_stop_before_fixup_and_save_signal(setup, monkeypatch
     assert not (setup.item_dir / f"{STEM}.musicxml").exists()
     assert not list(setup.item_dir.glob("*.mscz"))
     assert not (setup.bin / "mscore.args").exists()
+
+
+@pytest.mark.parametrize("keep_text", [False, True])
+def test_text_policy_runs_once_for_multipart_and_preserves_review(setup, monkeypatch, keep_text):
+    from tests.test_strip_text import synthetic_score
+
+    data = json.loads(setup.manifest.read_text())
+    data["items"][0].update(parts=["Trumpet 1", "Trumpet 2"], keep_text=keep_text)
+    setup.manifest.write_text(json.dumps(data))
+    root = synthetic_score()
+    monkeypatch.setenv(
+        AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [ET.tostring(root, encoding="unicode")]))
+    )
+    monkeypatch.setenv(MUSESCORE_ENV_VAR, str(fake_musescore(setup.bin, two_trumpet_mscx())))
+    assert setup.run() == 0
+    status = setup.status()
+    assert status.review_signals == check_review_signals(root, 3, 2)
+    fixed = read_musicxml(setup.item_dir / f"{STEM}.musicxml")
+    assert (fixed.find(".//lyric") is not None) == keep_text
+    assert status.text_removals == dict(
+        credits=0 if keep_text else 1,
+        headers=0 if keep_text else 8,
+        lyrics=0 if keep_text else 2,
+        words=0 if keep_text else 6,
+        rehearsals=0 if keep_text else 2,
+        technical=0 if keep_text else 16,
+    )
+    words = [el.text for el in fixed.iter("words")]
+    assert all("Review: " + s.detail in words for s in status.review_signals)
+    assert fixed.findtext(".//rehearsal") == ("A" if keep_text else "?")
