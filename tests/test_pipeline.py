@@ -10,6 +10,7 @@ import pytest
 
 from omr_ingestor.audiveris import AUDIVERIS_ENV_VAR
 from omr_ingestor.cli import main
+from omr_ingestor.durations import check_review_signals
 from omr_ingestor.instruments import load_instruments
 from omr_ingestor.musescore import MUSESCORE_ENV_VAR
 from omr_ingestor.musicxml import read_musicxml
@@ -625,6 +626,7 @@ def test_review_signals_reach_status_batch_cli_and_score(setup, monkeypatch, cap
     words = [el.text for el in fixed.findall("part/measure/direction/direction-type/words")]
     assert any("2 measure(s) read, 3 expected" in w for w in words)
     assert any("navigation-like lyric" in w for w in words)
+    assert words == ["Review: " + signal.detail for signal in status.review_signals]
     raw = read_musicxml(setup.item_dir / "audiveris" / f"{STEM}.musicxml")
     assert [ET.tostring(n) for n in fixed.findall("part/measure/note")] == [
         ET.tostring(n) for n in raw.findall("part/measure/note")
@@ -633,3 +635,40 @@ def test_review_signals_reach_status_batch_cli_and_score(setup, monkeypatch, cap
     assert "navigation_lyric" in capsys.readouterr().err
     assert setup.run() == 0
     assert "review required: true" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("multipart", [False, True])
+def test_clean_item_has_no_review_signals(setup, monkeypatch, multipart):
+    parts = {
+        pid: [measure(n, (DEFAULT_ATTRS if n == 1 else "") + note(4)) for n in range(1, 4)]
+        for pid in (["P1", "P2"] if multipart else ["P1"])
+    }
+    if multipart:
+        configure_parts(setup, ["Trumpet 1", "Trumpet 2"])
+        monkeypatch.setenv(MUSESCORE_ENV_VAR, str(fake_musescore(setup.bin, two_trumpet_mscx())))
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [score(parts)])))
+    assert setup.run() == 0
+    status = setup.status()
+    assert not status.suspect_measures
+    assert status.review_signals == ()
+    assert status.review_required is False
+    fixed = read_musicxml(setup.item_dir / f"{STEM}.musicxml")
+    assert not fixed.findall("part/measure/direction")
+
+
+def test_score_wide_annotation_appears_once_with_duplicate_part_ids():
+    from omr_ingestor.pipeline import _annotate_review_signals
+
+    root = ET.fromstring(
+        score({pid: [measure(1, DEFAULT_ATTRS + note(4))] for pid in ["P1", "P2"]})
+    )
+    root.findall("part")[1].set("id", "P1")
+    signals = check_review_signals(root, 1, 2)
+    assert [signal.code for signal in signals] == ["part_identity"]
+    _annotate_review_signals(root, signals)
+    parts = root.findall("part")
+    assert (
+        parts[0].findtext("measure/direction/direction-type/words")
+        == "Review: " + signals[0].detail
+    )
+    assert not parts[1].findall("measure/direction")

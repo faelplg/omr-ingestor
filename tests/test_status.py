@@ -3,6 +3,7 @@ import os
 
 import pytest
 
+from omr_ingestor.durations import ReviewSignal
 from omr_ingestor.status import (
     ItemStatus,
     Stage,
@@ -213,8 +214,6 @@ def test_read_rejects_bad_files(tmp_path, edit, message):
 
 
 def test_review_signals_round_trip_and_validate_derived_state(tmp_path):
-    from omr_ingestor.durations import ReviewSignal
-
     signal = ReviewSignal("navigation_lyric", "navigation-like lyric 'Fine'", "P1", "2")
     item = sample(measures_read=60, suspect_measures=(), review_signals=(signal,))
     path = tmp_path / "status.json"
@@ -230,3 +229,25 @@ def test_review_signals_round_trip_and_validate_derived_state(tmp_path):
     with pytest.raises(StatusError, match="measure"):
         ItemStatus.from_dict(data)
     assert not sample(measures_read=60, suspect_measures=()).review_required
+
+
+@pytest.mark.parametrize(
+    "change", [{"extra": "unexpected"}, {"code": ""}, {"code": "unknown"}, {"measure": None}]
+)
+def test_invalid_signal_file_is_rejected(tmp_path, change):
+    item = sample(review_signals=(ReviewSignal("part_identity", "check IDs"),))
+    data = item.to_dict()
+    data["review_signals"][0].update(change)
+    path = tmp_path / "invalid.json"
+    path.write_text(json.dumps(data))
+    with pytest.raises(StatusError, match="review_signals"):
+        read_status(path)
+
+
+def test_signal_file_with_missing_key_is_rejected(tmp_path):
+    data = sample(review_signals=(ReviewSignal("part_identity", "check IDs"),)).to_dict()
+    del data["review_signals"][0]["measure"]
+    path = tmp_path / "invalid.json"
+    path.write_text(json.dumps(data))
+    with pytest.raises(StatusError, match="review_signals"):
+        read_status(path)

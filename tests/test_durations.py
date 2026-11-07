@@ -3,7 +3,7 @@ from fractions import Fraction
 
 import pytest
 
-from omr_ingestor.durations import check_durations, measure_durations
+from omr_ingestor.durations import check_durations, check_review_signals, measure_durations
 from omr_ingestor.musicxml import MusicXMLError, parse_musicxml
 from tests.musicxml_builders import DEFAULT_ATTRS, measure, multiple_rest, note, rest, score
 
@@ -223,8 +223,6 @@ def test_unusable_input_fails_clearly(xml, match):
 
 @pytest.mark.parametrize("expected", [1, 3])
 def test_count_review_is_independent_of_valid_durations(expected):
-    from omr_ingestor.durations import check_review_signals
-
     root = ET.fromstring(score({"P1": [measure(1, DEFAULT_ATTRS + note(4)), measure(2, note(4))]}))
     assert not check_durations(root).suspects
     signals = check_review_signals(root, expected)
@@ -235,8 +233,6 @@ def test_count_review_is_independent_of_valid_durations(expected):
 
 
 def test_part_count_and_structural_identity_review():
-    from omr_ingestor.durations import check_review_signals
-
     root = ET.fromstring(
         score({f"P{i}": [measure(1, DEFAULT_ATTRS + rest(4, measure=True))] for i in range(6)})
     )
@@ -247,11 +243,11 @@ def test_part_count_and_structural_identity_review():
     assert "part_identity" in [s.code for s in check_review_signals(root, 1, 6)]
 
 
-@pytest.mark.parametrize("text", ["D.C.", "D.S.", "Fine", "Coda", "al Fine", "D. C. al Fine"])
+@pytest.mark.parametrize(
+    "text", ["D.C.", "D.S.", "Fine", "Coda", "al Fine", "D. C. al Fine", "Fim"]
+)
 @pytest.mark.parametrize("direction", [False, True])
 def test_navigation_lyrics_require_review_even_with_directions(text, direction):
-    from omr_ingestor.durations import check_review_signals
-
     nav = '<direction><sound dacapo="yes"/></direction>' if direction else ""
     lyric = f"<lyric><text>{text}</text></lyric>"
     root = ET.fromstring(score({"P1": [measure(1, DEFAULT_ATTRS + nav + note(4, extra=lyric))]}))
@@ -265,8 +261,6 @@ def test_navigation_lyrics_require_review_even_with_directions(text, direction):
 
 
 def test_navigation_matching_avoids_word_fragments_and_joins_lyric_text():
-    from omr_ingestor.durations import check_review_signals
-
     root = ET.fromstring(
         score(
             {
@@ -286,3 +280,45 @@ def test_navigation_matching_avoids_word_fragments_and_joins_lyric_text():
     ET.SubElement(lyric, "text").text = "D."
     ET.SubElement(lyric, "text").text = "C."
     assert check_review_signals(root, 1)[0].code == "navigation_lyric"
+
+
+@pytest.mark.parametrize("attribute", ["fine", "dacapo", "dalsegno", "coda", "tocoda", "segno"])
+def test_measure_sound_counts_as_navigation(attribute):
+    root = ET.fromstring(
+        score(
+            {
+                "P1": [
+                    measure(
+                        1,
+                        DEFAULT_ATTRS
+                        + f'<sound {attribute}="yes"/>'
+                        + note(4, extra="<lyric><text>Fine</text></lyric>"),
+                    )
+                ]
+            }
+        )
+    )
+    signals = check_review_signals(root, 1)
+    assert len(signals) == 1
+    assert "no navigation direction" not in signals[0].detail
+
+
+@pytest.mark.parametrize("symbol", ["segno", "coda"])
+def test_barline_symbol_counts_as_navigation(symbol):
+    root = ET.fromstring(
+        score(
+            {
+                "P1": [
+                    measure(
+                        1,
+                        DEFAULT_ATTRS
+                        + note(4, extra="<lyric><text>Fine</text></lyric>")
+                        + f"<barline><{symbol}/></barline>",
+                    )
+                ]
+            }
+        )
+    )
+    signals = check_review_signals(root, 1)
+    assert len(signals) == 1
+    assert "no navigation direction" not in signals[0].detail

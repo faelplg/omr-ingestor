@@ -58,10 +58,12 @@ of stage success and duration suspects. Each signal contains `code`, `detail`,
 - `part_identity`: part IDs must be unique and match the score-part declarations.
   Manifest names are assigned output labels, so these checks cannot establish
   musical identity or detect swapped voices with otherwise valid structure.
-- `navigation_lyric`: lyric text resembling D.C., D.S., Fine, Coda or al Fine
+- `navigation_lyric`: lyric text resembling D.C., D.S., Fine, Fim, Coda or al Fine
   requires review, including when navigation directions already exist. Its detail
   also reports when the part has no navigation direction (words, symbols or sound
-  navigation attributes). Matching is case insensitive and checks word boundaries.
+  navigation attributes), including measure-level sound and barline segno/coda symbols.
+  Matching is case insensitive and checks word boundaries. Ordinary words, such as
+  English "fine", can also be flagged; these are review hints, not confirmed errors.
 
 `run` prints the review state and warnings; `batch` carries the same signals in its
 summary and stderr warnings. Duration and volta suspects also set `review_required`.
@@ -70,7 +72,8 @@ fail a conversion. The hand-correction acceptance ratio remains a separate human
 review metric; it does not clear these warnings.
 
 For converted scores, review signals become `Review: ...` text above the affected
-measure, or above the first measure for a part-wide warning. Existing `?` duration
+measure, or above the first measure for a part-wide warning. Score-wide warnings appear
+only in the first part, and multiple warnings retain status order. Existing `?` duration
 marks remain. Notes, rests, ties, articulations and navigation are never repaired
 by these checks. Equal-duration substitutions, artificial rest distributions and
 musical continuity still require source-backed review. Status schemas 1-3 remain

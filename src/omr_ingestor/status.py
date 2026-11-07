@@ -19,7 +19,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from omr_ingestor.durations import ReviewSignal
+from omr_ingestor.durations import REVIEW_SIGNAL_CODES, ReviewSignal
 
 SCHEMA_VERSION = 4
 READABLE_SCHEMA_VERSIONS = (1, 2, 3, 4)
@@ -306,19 +306,21 @@ def _from_dict(cls: type[ItemStatus], data: Any, source: str) -> ItemStatus:
         for k, v in options.items():
             _expect(k, str, f"{source}.audiveris_options key")
             _expect(v, str, f"{source}.audiveris_options.{k}")
-    signals = tuple(
-        ReviewSignal(
-            **{
-                key: _expect(signal[key], str, f"{source}.review_signals[{i}].{key}")
-                for key in ("code", "detail", "part_id", "measure")
-            }
-        )
-        for i, signal in enumerate(
-            _expect(data.get("review_signals", []), list, f"{source}.review_signals")
-        )
-    )
+    signals = []
+    signal_keys = {"code", "detail", "part_id", "measure"}
+    for i, signal in enumerate(
+        _expect(data.get("review_signals", []), list, f"{source}.review_signals")
+    ):
+        where = f"{source}.review_signals[{i}]"
+        _expect(signal, dict, where)
+        if set(signal) != signal_keys:
+            raise StatusError(f"{where}: expected exactly keys {sorted(signal_keys)}")
+        fields = {key: _expect(signal[key], str, f"{where}.{key}") for key in signal_keys}
+        if fields["code"] not in REVIEW_SIGNAL_CODES:
+            raise StatusError(f"{where}.code: unknown review signal code {fields['code']!r}")
+        signals.append(ReviewSignal(**fields))
     item = cls(
-        review_signals=signals,
+        review_signals=tuple(signals),
         pdf=_expect(data["pdf"], str, f"{source}.pdf"),
         instrument=_expect(data["instrument"], str, f"{source}.instrument"),
         expected_measures=_expect(data["expected_measures"], int, f"{source}.expected_measures"),

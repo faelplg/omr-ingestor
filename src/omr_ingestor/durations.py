@@ -264,8 +264,14 @@ class ReviewSignal:
     measure: str = ""
 
 
+REVIEW_SIGNAL_CODES = frozenset(
+    {"measure_count_mismatch", "part_count_mismatch", "part_identity", "navigation_lyric"}
+)
+_NAVIGATION_SOUND_ATTRIBUTES = frozenset({"dacapo", "dalsegno", "tocoda", "fine", "coda", "segno"})
+
+
 _NAVIGATION = re.compile(
-    r"(?<!\w)(?:d\s*\.?\s*[cs]\s*\.?(?!\w)|(?:al\s+)?fine\b|coda\b)",
+    r"(?<!\w)(?:d\s*\.?\s*[cs]\s*\.?(?!\w)|(?:al\s+)?fine\b|coda\b|fim\b)",
     re.IGNORECASE,
 )
 
@@ -311,16 +317,24 @@ def check_review_signals(
                     pid,
                 )
             )
-        has_navigation = any(
-            direction.find(".//coda") is not None
-            or direction.find(".//segno") is not None
-            or any(_NAVIGATION.search(words.text or "") for words in direction.findall(".//words"))
-            or any(
-                key in sound.attrib
-                for sound in direction.findall(".//sound")
-                for key in ("dacapo", "dalsegno", "tocoda", "fine", "coda", "segno")
+        has_navigation = (
+            any(
+                direction.find(".//coda") is not None
+                or direction.find(".//segno") is not None
+                or any(
+                    _NAVIGATION.search(words.text or "") for words in direction.findall(".//words")
+                )
+                for direction in part.findall("measure/direction")
             )
-            for direction in part.findall("measure/direction")
+            or any(
+                _NAVIGATION_SOUND_ATTRIBUTES.intersection(sound.attrib)
+                for sound in part.findall("measure/sound") + part.findall("measure/direction/sound")
+            )
+            or any(
+                barline.find(symbol) is not None
+                for barline in part.findall("measure/barline")
+                for symbol in ("segno", "coda")
+            )
         )
         for measure in measures:
             for lyric in measure.findall("note/lyric"):
