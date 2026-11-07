@@ -37,7 +37,7 @@ from omr_ingestor.durations import (
     check_durations,
     check_review_signals,
 )
-from omr_ingestor.fixup import fix_instrument
+from omr_ingestor.fixup import fix_instrument, strip_text
 from omr_ingestor.instruments import Instrument, InstrumentsError, load_instruments
 from omr_ingestor.manifest import ManifestError, load_manifest
 from omr_ingestor.mscx_check import A5_LANDSCAPE, MM_PER_INCH, MscxCheckError, PageSize
@@ -246,6 +246,7 @@ class _Context:
     paths: ItemPaths
     status: ItemStatus
     parts: tuple[str, ...] | None = None
+    keep_text: bool = False
     raw_musicxml: Path | None = None
     report: DurationReport | None = None
     uncounted_reason: UncountedReason | None = UncountedReason.BEFORE_DURATIONS
@@ -387,6 +388,7 @@ def _fixup(ctx: _Context) -> str:
                 f"score has {len(parts)} parts; manifest parts expects {len(ctx.parts)}"
             )
         names = ctx.parts
+    removals = strip_text(root, keep_text=ctx.keep_text)
     details = []
     added = []
     for part, name in zip(parts, names, strict=True):
@@ -412,10 +414,11 @@ def _fixup(ctx: _Context) -> str:
         os.replace(tmp, target)
     finally:
         tmp.unlink(missing_ok=True)
-    if added:
-        ctx.status = replace(
-            ctx.status, suspect_measures=ctx.status.suspect_measures + tuple(added)
-        )
+    ctx.status = replace(
+        ctx.status,
+        text_removals=removals,
+        suspect_measures=ctx.status.suspect_measures + tuple(added),
+    )
     return "; ".join(details)
 
 
@@ -493,6 +496,7 @@ def _prepare(manifest_path: Path, selector: str, output_dir: Path) -> _Context:
     )
     return _Context(
         tools=tools,
+        keep_text=item.get("keep_text", False),
         parts=tuple(item["parts"]) if "parts" in item else None,
         instrument=instruments[item["instrument"]],
         pdf=pdf,

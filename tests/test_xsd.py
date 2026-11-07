@@ -13,8 +13,7 @@ from omr_ingestor.xsd import (
     resolve_xsd_path,
     validate_xsd,
 )
-from tests.musicxml_builders import DEFAULT_ATTRS, measure, note, score
-from tests.test_fixup import omr_score
+from tests.musicxml_builders import DEFAULT_ATTRS, measure, note, omr_score, score
 
 needs_xmllint = pytest.mark.skipif(shutil.which("xmllint") is None, reason="xmllint not installed")
 needs_musicxml_xsd = pytest.mark.skipif(

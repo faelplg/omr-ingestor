@@ -21,6 +21,7 @@ from omr_ingestor.musicxml import (
     read_musicxml,
     write_musicxml,
 )
+from omr_ingestor.navigation import _NAVIGATION, _NAVIGATION_SOUND_ATTRIBUTES
 
 
 class FixupError(MusicXMLError):
@@ -209,6 +210,65 @@ def remove_page_layout(root: ET.Element) -> None:
     for measure in root.iterfind("part/measure"):
         _remove_all(measure, "print")
         measure.attrib.pop("width", None)
+
+
+# Counts refer to removed elements, not their descendant nodes or empty wrappers.
+TEXT_REMOVAL_CATEGORIES = ("credits", "headers", "lyrics", "words", "rehearsals", "technical")
+_TEXT_TECHNICAL = ("fingering", "pluck", "other-technical")
+
+
+def strip_text(root: ET.Element, *, keep_text: bool = False) -> dict[str, int]:
+    """Clean a raw export before adding our review annotations or applying instruments.
+
+    Apply once to the whole score, including every part. Directions tied to a
+    navigation sound or navigation-like words remain intact, including positioning.
+    """
+    counts = dict.fromkeys(TEXT_REMOVAL_CATEGORIES, 0)
+    if keep_text:
+        return counts
+
+    def remove(parent: ET.Element, tag: str, category: str) -> None:
+        for child in parent.findall(tag):
+            parent.remove(child)
+            counts[category] += 1
+
+    remove(root, "credit", "credits")
+    for tag in ("work", "movement-number", "movement-title"):
+        remove(root, tag, "headers")
+    for identification in root.findall("identification"):
+        for tag in ("creator", "rights", "source", "relation", "miscellaneous"):
+            remove(identification, tag, "headers")
+        if not len(identification):
+            root.remove(identification)
+    for note in root.iter("note"):
+        remove(note, "lyric", "lyrics")
+        for notations in note.findall("notations"):
+            removed_before = counts["technical"]
+            for technical in notations.findall("technical"):
+                had_children = bool(len(technical))
+                for tag in _TEXT_TECHNICAL:
+                    remove(technical, tag, "technical")
+                if had_children and not len(technical):
+                    notations.remove(technical)
+            if counts["technical"] > removed_before and not len(notations):
+                note.remove(notations)
+    for measure in root.iterfind("part/measure"):
+        for direction in measure.findall("direction"):
+            if any(
+                _NAVIGATION_SOUND_ATTRIBUTES.intersection(sound.attrib)
+                for sound in direction.findall("sound")
+            ) or any(
+                _NAVIGATION.search(words.text or "") for words in direction.findall(".//words")
+            ):
+                continue
+            for kind in direction.findall("direction-type"):
+                remove(kind, "words", "words")
+                remove(kind, "rehearsal", "rehearsals")
+                if not len(kind):
+                    direction.remove(kind)
+            if direction.find("direction-type") is None:
+                measure.remove(direction)
+    return counts
 
 
 def _has_mark(measure: ET.Element, text: str) -> bool:

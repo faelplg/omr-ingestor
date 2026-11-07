@@ -10,13 +10,13 @@ its duration: Audiveris reads every multi-measure rest as one bar, so the part l
 measures there. The length is reported as read, never guessed.
 """
 
-import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, replace
 from fractions import Fraction
 from pathlib import Path
 
 from omr_ingestor.musicxml import MusicXMLError, read_musicxml
+from omr_ingestor.navigation import _NAVIGATION, _NAVIGATION_SOUND_ATTRIBUTES
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,13 +266,6 @@ class ReviewSignal:
 
 REVIEW_SIGNAL_CODES = frozenset(
     {"measure_count_mismatch", "part_count_mismatch", "part_identity", "navigation_lyric"}
-)
-_NAVIGATION_SOUND_ATTRIBUTES = frozenset({"dacapo", "dalsegno", "tocoda", "fine", "coda", "segno"})
-
-
-_NAVIGATION = re.compile(
-    r"(?<!\w)(?:d\s*\.?\s*[cs]\s*\.?(?!\w)|(?:al\s+)?fine\b|coda\b|fim\b)",
-    re.IGNORECASE,
 )
 
 

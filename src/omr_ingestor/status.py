@@ -8,6 +8,7 @@ people reading the file and recomputed (and checked) when reading it.
 Schema version 1 had no measure_count; such files still read, with measures_read None.
 Versions 1 and 2 did not record audiveris_options; these read as None (unknown).
 Versions 1-3 did not record review signals; these read as an empty tuple.
+Versions 1-4 did not record text removals; these read as None (unknown).
 """
 
 import json
@@ -20,9 +21,10 @@ from pathlib import Path
 from typing import Any
 
 from omr_ingestor.durations import REVIEW_SIGNAL_CODES, ReviewSignal
+from omr_ingestor.fixup import TEXT_REMOVAL_CATEGORIES
 
-SCHEMA_VERSION = 4
-READABLE_SCHEMA_VERSIONS = (1, 2, 3, 4)
+SCHEMA_VERSION = 5
+READABLE_SCHEMA_VERSIONS = (1, 2, 3, 4, 5)
 ACCEPTANCE_PERCENT = 5  # up to 5% of expected_measures corrected by hand
 ACCEPTANCE_LIMIT = ACCEPTANCE_PERCENT / 100
 RATIO_DIGITS = 6
@@ -104,6 +106,8 @@ class ItemStatus:
     audiveris_options: dict[str, str] | None = field(default_factory=dict)
 
     review_signals: tuple[ReviewSignal, ...] = ()
+    # None before cleanup or for legacy files; zero counts when keep_text is true.
+    text_removals: dict[str, int] | None = None
 
     @property
     def review_required(self) -> bool:
@@ -130,6 +134,8 @@ class ItemStatus:
             raise StatusError(
                 f"measures_read must be a non-negative integer, got {self.measures_read!r}"
             )
+        if self.text_removals is not None:
+            _validate_text_removals(self.text_removals, "text_removals")
         names = [s.name for s in self.stages]
         if len(set(names)) != len(names):
             raise StatusError(f"duplicate stage in {names}")
@@ -186,6 +192,7 @@ class ItemStatus:
                 {"code": s.code, "detail": s.detail, "part_id": s.part_id, "measure": s.measure}
                 for s in self.review_signals
             ],
+            "text_removals": None if self.text_removals is None else dict(self.text_removals),
             "pdf": self.pdf,
             "instrument": self.instrument,
             "expected_measures": self.expected_measures,
@@ -234,10 +241,20 @@ def _expect(value: Any, typ: type | tuple[type, ...], where: str) -> Any:
     return value
 
 
+def _validate_text_removals(value: Any, where: str) -> None:
+    _expect(value, dict, where)
+    if set(value) != set(TEXT_REMOVAL_CATEGORIES):
+        raise StatusError(f"{where}: expected exactly keys {list(TEXT_REMOVAL_CATEGORIES)}")
+    for category, count in value.items():
+        if _expect(count, int, f"{where}.{category}") < 0:
+            raise StatusError(f"{where}.{category}: count must be non-negative")
+
+
 _TOP_KEYS = (
     "schema_version",
     "review_required",
     "review_signals",
+    "text_removals",
     "pdf",
     "instrument",
     "expected_measures",
@@ -249,7 +266,8 @@ _TOP_KEYS = (
     "tool_versions",
     "audiveris_options",
 )
-_V3_TOP_KEYS = tuple(k for k in _TOP_KEYS if k not in ("review_required", "review_signals"))
+_V4_TOP_KEYS = tuple(k for k in _TOP_KEYS if k != "text_removals")
+_V3_TOP_KEYS = tuple(k for k in _V4_TOP_KEYS if k not in ("review_required", "review_signals"))
 _V2_TOP_KEYS = tuple(k for k in _V3_TOP_KEYS if k != "audiveris_options")
 _V1_TOP_KEYS = tuple(k for k in _V2_TOP_KEYS if k != "measure_count")
 
@@ -262,7 +280,14 @@ def _from_dict(cls: type[ItemStatus], data: Any, source: str) -> ItemStatus:
             f"{source}: schema_version {version!r}, expected one of "
             f"{list(READABLE_SCHEMA_VERSIONS)}"
         )
-    keys = {1: _V1_TOP_KEYS, 2: _V2_TOP_KEYS, 3: _V3_TOP_KEYS, 4: _TOP_KEYS}[version]
+    keys_by_version = {
+        1: _V1_TOP_KEYS,
+        2: _V2_TOP_KEYS,
+        3: _V3_TOP_KEYS,
+        4: _V4_TOP_KEYS,
+        5: _TOP_KEYS,
+    }
+    keys = keys_by_version[version]
     if sorted(data) != sorted(keys):
         raise StatusError(f"{source}: keys {sorted(data)}, expected {sorted(keys)}")
     count = data.get("measure_count")
@@ -321,6 +346,7 @@ def _from_dict(cls: type[ItemStatus], data: Any, source: str) -> ItemStatus:
         signals.append(ReviewSignal(**fields))
     item = cls(
         review_signals=tuple(signals),
+        text_removals=data.get("text_removals"),
         pdf=_expect(data["pdf"], str, f"{source}.pdf"),
         instrument=_expect(data["instrument"], str, f"{source}.instrument"),
         expected_measures=_expect(data["expected_measures"], int, f"{source}.expected_measures"),
@@ -331,7 +357,7 @@ def _from_dict(cls: type[ItemStatus], data: Any, source: str) -> ItemStatus:
         tool_versions=dict(versions),
         audiveris_options=None if options is None else dict(options),
     )
-    if version == 4 and (
+    if version >= 4 and (
         _expect(data["review_required"], bool, f"{source}.review_required") != item.review_required
     ):
         raise StatusError(f"{source}: review_required does not match review signals and suspects")

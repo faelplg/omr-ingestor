@@ -23,6 +23,7 @@
             "items": {"type": "string", "minLength": 1, "pattern": "\\S"},
             "description": "Part names in score order; omitted means exactly one part with the instrument name"
           },
+          "keep_text": {"type": "boolean", "default": false, "description": "Keep original headers, credits, lyrics, words, rehearsal marks and text-like technical marks"},
           "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
           "audiveris_options": {
             "type": "object",
