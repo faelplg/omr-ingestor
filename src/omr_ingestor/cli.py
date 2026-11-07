@@ -18,6 +18,9 @@ def _print_run(result: RunResult) -> None:
         if stage.detail and stage.status is StageState.PASSED:
             line += f" - {stage.detail}"
         print(line)
+    print(f"review required: {str(result.status.review_required).lower()}")
+    for signal in result.status.review_signals:
+        print(f"warning: {signal.code}: {signal.detail}", file=sys.stderr)
     print(f"status: {result.paths.status}")
     failed = result.failed_stage
     if failed is not None:
@@ -28,7 +31,7 @@ def _print_run(result: RunResult) -> None:
 
 def _describe_item(item: BatchItem) -> str:
     if item.passed:
-        return item.status
+        return item.status + (" (review required)" if item.review_required else "")
     if item.failed_stage is not None:
         return f"{item.status} at {item.failed_stage}: {item.error}"
     return f"{item.status}: {item.error}"
@@ -49,6 +52,8 @@ def _print_batch(result: BatchResult) -> None:
         status = (
             item.status if item.failed_stage is None else f"{item.status} ({item.failed_stage})"
         )
+        if item.passed and item.review_required:
+            status += " (review required)"
         rows.append(
             (
                 item.stem,
@@ -68,6 +73,9 @@ def _print_batch(result: BatchResult) -> None:
         print("  ".join(text).rstrip())
     print()
 
+    for item in result.items:
+        for signal in item.review_signals:
+            print(f"warning: {item.stem}: {signal.code}: {signal.detail}", file=sys.stderr)
     check = result.cross_part
     reads = {it.stem: it.measures_read for it in result.items}
     expected = {it.stem: it.expected_measures for it in result.items}

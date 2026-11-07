@@ -7,6 +7,7 @@ people reading the file and recomputed (and checked) when reading it.
 
 Schema version 1 had no measure_count; such files still read, with measures_read None.
 Versions 1 and 2 did not record audiveris_options; these read as None (unknown).
+Versions 1-3 did not record review signals; these read as an empty tuple.
 """
 
 import json
@@ -18,8 +19,10 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 3
-READABLE_SCHEMA_VERSIONS = (1, 2, 3)
+from omr_ingestor.durations import REVIEW_SIGNAL_CODES, ReviewSignal
+
+SCHEMA_VERSION = 4
+READABLE_SCHEMA_VERSIONS = (1, 2, 3, 4)
 ACCEPTANCE_PERCENT = 5  # up to 5% of expected_measures corrected by hand
 ACCEPTANCE_LIMIT = ACCEPTANCE_PERCENT / 100
 RATIO_DIGITS = 6
@@ -100,6 +103,16 @@ class ItemStatus:
     # Overrides passed to Audiveris; {} uses tool defaults, None means not recorded.
     audiveris_options: dict[str, str] | None = field(default_factory=dict)
 
+    review_signals: tuple[ReviewSignal, ...] = ()
+
+    @property
+    def review_required(self) -> bool:
+        return bool(
+            self.review_signals
+            or self.suspect_measures
+            or (self.measure_count is not None and self.measure_count.missing != 0)
+        )
+
     def __post_init__(self) -> None:
         if (
             isinstance(self.expected_measures, bool)
@@ -168,6 +181,11 @@ class ItemStatus:
         count = self.measure_count
         return {
             "schema_version": SCHEMA_VERSION,
+            "review_required": self.review_required,
+            "review_signals": [
+                {"code": s.code, "detail": s.detail, "part_id": s.part_id, "measure": s.measure}
+                for s in self.review_signals
+            ],
             "pdf": self.pdf,
             "instrument": self.instrument,
             "expected_measures": self.expected_measures,
@@ -218,6 +236,8 @@ def _expect(value: Any, typ: type | tuple[type, ...], where: str) -> Any:
 
 _TOP_KEYS = (
     "schema_version",
+    "review_required",
+    "review_signals",
     "pdf",
     "instrument",
     "expected_measures",
@@ -229,7 +249,8 @@ _TOP_KEYS = (
     "tool_versions",
     "audiveris_options",
 )
-_V2_TOP_KEYS = tuple(k for k in _TOP_KEYS if k != "audiveris_options")
+_V3_TOP_KEYS = tuple(k for k in _TOP_KEYS if k not in ("review_required", "review_signals"))
+_V2_TOP_KEYS = tuple(k for k in _V3_TOP_KEYS if k != "audiveris_options")
 _V1_TOP_KEYS = tuple(k for k in _V2_TOP_KEYS if k != "measure_count")
 
 
@@ -241,7 +262,7 @@ def _from_dict(cls: type[ItemStatus], data: Any, source: str) -> ItemStatus:
             f"{source}: schema_version {version!r}, expected one of "
             f"{list(READABLE_SCHEMA_VERSIONS)}"
         )
-    keys = {1: _V1_TOP_KEYS, 2: _V2_TOP_KEYS, 3: _TOP_KEYS}[version]
+    keys = {1: _V1_TOP_KEYS, 2: _V2_TOP_KEYS, 3: _V3_TOP_KEYS, 4: _TOP_KEYS}[version]
     if sorted(data) != sorted(keys):
         raise StatusError(f"{source}: keys {sorted(data)}, expected {sorted(keys)}")
     count = data.get("measure_count")
@@ -285,7 +306,21 @@ def _from_dict(cls: type[ItemStatus], data: Any, source: str) -> ItemStatus:
         for k, v in options.items():
             _expect(k, str, f"{source}.audiveris_options key")
             _expect(v, str, f"{source}.audiveris_options.{k}")
+    signals = []
+    signal_keys = {"code", "detail", "part_id", "measure"}
+    for i, signal in enumerate(
+        _expect(data.get("review_signals", []), list, f"{source}.review_signals")
+    ):
+        where = f"{source}.review_signals[{i}]"
+        _expect(signal, dict, where)
+        if set(signal) != signal_keys:
+            raise StatusError(f"{where}: expected exactly keys {sorted(signal_keys)}")
+        fields = {key: _expect(signal[key], str, f"{where}.{key}") for key in signal_keys}
+        if fields["code"] not in REVIEW_SIGNAL_CODES:
+            raise StatusError(f"{where}.code: unknown review signal code {fields['code']!r}")
+        signals.append(ReviewSignal(**fields))
     item = cls(
+        review_signals=tuple(signals),
         pdf=_expect(data["pdf"], str, f"{source}.pdf"),
         instrument=_expect(data["instrument"], str, f"{source}.instrument"),
         expected_measures=_expect(data["expected_measures"], int, f"{source}.expected_measures"),
@@ -296,6 +331,10 @@ def _from_dict(cls: type[ItemStatus], data: Any, source: str) -> ItemStatus:
         tool_versions=dict(versions),
         audiveris_options=None if options is None else dict(options),
     )
+    if version == 4 and (
+        _expect(data["review_required"], bool, f"{source}.review_required") != item.review_required
+    ):
+        raise StatusError(f"{source}: review_required does not match review signals and suspects")
     if count != item.to_dict()["measure_count"]:
         raise StatusError(
             f"{source}: measure_count {count!r} does not match its read count and expected_measures"

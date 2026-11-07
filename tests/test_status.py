@@ -3,6 +3,7 @@ import os
 
 import pytest
 
+from omr_ingestor.durations import ReviewSignal
 from omr_ingestor.status import (
     ItemStatus,
     Stage,
@@ -64,20 +65,26 @@ def test_measure_count_records_missing_and_extra_measures():
     assert sample(measures_read=62).measure_count.missing == -2
 
 
-@pytest.mark.parametrize("version", [1, 2])
+@pytest.mark.parametrize("version", [1, 2, 3])
 def test_reads_legacy_schema_versions_and_preserves_review(tmp_path, version):
     path = tmp_path / "status.json"
     data = sample().to_dict()
-    del data["audiveris_options"]
+    del data["review_signals"]
+    del data["review_required"]
+    if version < 3:
+        del data["audiveris_options"]
     if version == 1:
         del data["measure_count"]
     data["schema_version"] = version
     path.write_text(json.dumps(data), encoding="utf-8")
-    expected = sample(audiveris_options=None, measures_read=None if version == 1 else 51)
+    expected = sample(
+        audiveris_options=None if version < 3 else {},
+        measures_read=None if version == 1 else 51,
+    )
     assert read_status(path) == expected
     write_status(read_status(path), path)
     assert read_status(path) == expected
-    assert json.loads(path.read_text())["schema_version"] == 3
+    assert json.loads(path.read_text())["schema_version"] == 4
 
 
 def test_audiveris_options_round_trip(tmp_path):
@@ -100,6 +107,8 @@ def test_stable_key_order_and_bytes(tmp_path):
     data = json.loads(a.read_text(encoding="utf-8"))
     assert list(data) == [
         "schema_version",
+        "review_required",
+        "review_signals",
         "pdf",
         "instrument",
         "expected_measures",
@@ -184,7 +193,7 @@ def test_invalid_values_raise(make, message):
     ("edit", "message"),
     [
         (lambda d: d["acceptance"].update(accepted=False), "does not match"),
-        (lambda d: d.update(schema_version=4), "schema_version"),
+        (lambda d: d.update(schema_version=5), "schema_version"),
         (lambda d: d.pop("audiveris_options"), "keys"),
         (lambda d: d.update(audiveris_options=[]), "audiveris_options"),
         (lambda d: d.update(audiveris_options={"constant": 600}), "audiveris_options"),
@@ -201,4 +210,44 @@ def test_read_rejects_bad_files(tmp_path, edit, message):
     edit(data)
     path.write_text(json.dumps(data), encoding="utf-8")
     with pytest.raises(StatusError, match=message):
+        read_status(path)
+
+
+def test_review_signals_round_trip_and_validate_derived_state(tmp_path):
+    signal = ReviewSignal("navigation_lyric", "navigation-like lyric 'Fine'", "P1", "2")
+    item = sample(measures_read=60, suspect_measures=(), review_signals=(signal,))
+    path = tmp_path / "status.json"
+    write_status(item, path)
+    assert read_status(path) == item
+    assert read_status(path).review_required
+    data = item.to_dict()
+    data["review_required"] = False
+    with pytest.raises(StatusError, match="review_required"):
+        ItemStatus.from_dict(data)
+    data = item.to_dict()
+    data["review_signals"][0]["measure"] = 2
+    with pytest.raises(StatusError, match="measure"):
+        ItemStatus.from_dict(data)
+    assert not sample(measures_read=60, suspect_measures=()).review_required
+
+
+@pytest.mark.parametrize(
+    "change", [{"extra": "unexpected"}, {"code": ""}, {"code": "unknown"}, {"measure": None}]
+)
+def test_invalid_signal_file_is_rejected(tmp_path, change):
+    item = sample(review_signals=(ReviewSignal("part_identity", "check IDs"),))
+    data = item.to_dict()
+    data["review_signals"][0].update(change)
+    path = tmp_path / "invalid.json"
+    path.write_text(json.dumps(data))
+    with pytest.raises(StatusError, match="review_signals"):
+        read_status(path)
+
+
+def test_signal_file_with_missing_key_is_rejected(tmp_path):
+    data = sample(review_signals=(ReviewSignal("part_identity", "check IDs"),)).to_dict()
+    del data["review_signals"][0]["measure"]
+    path = tmp_path / "invalid.json"
+    path.write_text(json.dumps(data))
+    with pytest.raises(StatusError, match="review_signals"):
         read_status(path)

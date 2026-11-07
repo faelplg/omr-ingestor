@@ -41,11 +41,52 @@ comparison. If counts differ, these fields are `null` and batch lists the item a
 check verifies every configured part's name, instrument, transposition and clef.
 One `.mscz` contains all parts.
 
+### Review signals
+
+A successful conversion still needs source review. `status.json` (schema 4) and
+`batch.json` items (schema 3) expose `review_required` and `review_signals`, independently
+of stage success and duration suspects. Each signal contains `code`, `detail`,
+`part_id` and `measure` (empty strings mean score-wide or part-wide scope).
+
+- `measure_count_mismatch`: each part is compared with `expected_measures`, even
+  when all retained measures have valid durations. Missing and extra bars both
+  require review. A warning at the start of the affected part asks the reader to
+  compare all systems with the PDF; it does not locate the missing content.
+- `part_count_mismatch`: the export must contain one part, or exactly the length
+  of `parts`. This warning is saved before the existing fixup failure stops the
+  item. No new corrected score is produced for an incompatible part count.
+- `part_identity`: part IDs must be unique and match the score-part declarations.
+  Manifest names are assigned output labels, so these checks cannot establish
+  musical identity or detect swapped voices with otherwise valid structure.
+  An identity mismatch fails the durations stage after recording the signal;
+  fixup and conversion are skipped to prevent transforming an ambiguous part.
+  Correct the MusicXML part IDs or rerun OMR before attempting instrument fixup.
+- `navigation_lyric`: lyric text resembling D.C., D.S., Fine, Fim, Coda or al Fine
+  requires review, including when navigation directions already exist. Its detail
+  also reports when the part has no navigation direction (words, symbols or sound
+  navigation attributes), including measure-level sound and barline segno/coda symbols.
+  Matching is case insensitive and checks word boundaries. Ordinary words, such as
+  English "fine", can also be flagged; these are review hints, not confirmed errors.
+
+`run` prints the review state and warnings; `batch` carries the same signals in its
+summary and stderr warnings. Duration and volta suspects also set `review_required`.
+Stage success and exit codes retain their existing meaning: a warning does not
+fail a conversion. The hand-correction acceptance ratio remains a separate human
+review metric; it does not clear these warnings.
+
+For converted scores, review signals become `Review: ...` text above the affected
+measure, or above the first measure for a part-wide warning. Score-wide warnings appear
+only in the first part, and multiple warnings retain status order. Existing `?` duration
+marks remain. Notes, rests, ties, articulations and navigation are never repaired
+by these checks. Equal-duration substitutions, artificial rest distributions and
+musical continuity still require source-backed review. Status schemas 1-3 remain
+readable with an empty signal list; only a rerun performs the new checks.
+
 ### Audiveris settings per input
 
 An item can supply `audiveris_options`, a map of fully qualified constant names to scalar strings. Each entry becomes a separate `-option name=value` argument, recorded in the item's `audiveris/audiveris.log`. Names must start with `org.audiveris.omr.`; values allow letters, digits, `_`, `.`, `+` and `-`. Omitting the map keeps the installed Audiveris defaults. Options apply only to that item on both `run` and `batch`. Audiveris owns the constant names and their meanings; check its log for unsupported settings when changing tool versions.
 
-The effective override map is recorded next to `tool_versions` in `status.json` (schema 3) and each `batch.json` item (schema 2). An empty map means tool defaults were used. Older status schemas remain readable with unknown options represented as `null`; batch items that never started also record `null`.
+The effective override map is recorded next to `tool_versions` in `status.json` (schema 4) and each `batch.json` item (schema 3). An empty map means tool defaults were used. Older status schemas remain readable with unknown options represented as `null`; batch items that never started also record `null`.
 
 For a single-instrument page surrounded by a decorative frame:
 

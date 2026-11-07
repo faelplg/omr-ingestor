@@ -31,7 +31,12 @@ from typing import Any
 
 from omr_ingestor import mscx_check, musescore
 from omr_ingestor.audiveris import AudiverisError, resolve_audiveris, run_audiveris
-from omr_ingestor.durations import DurationReport, check_durations
+from omr_ingestor.durations import (
+    DurationReport,
+    ReviewSignal,
+    check_durations,
+    check_review_signals,
+)
 from omr_ingestor.fixup import fix_instrument
 from omr_ingestor.instruments import Instrument, InstrumentsError, load_instruments
 from omr_ingestor.manifest import ManifestError, load_manifest
@@ -287,6 +292,9 @@ def _durations(ctx: _Context) -> str:
     ctx.status = replace(
         ctx.status,
         suspect_measures=tuple(SuspectMeasure(m.number, m.describe()) for m in suspects),
+        review_signals=check_review_signals(
+            root, ctx.status.expected_measures, len(ctx.parts) if ctx.parts is not None else 1
+        ),
         measures_read=counts[0]
         if len(counts) == 1 or (ctx.parts is not None and len(set(counts)) == 1)
         else None,
@@ -299,6 +307,11 @@ def _durations(ctx: _Context) -> str:
         ctx.uncounted_reason = UncountedReason.MISSING_PARTS
     else:
         ctx.uncounted_reason = UncountedReason.DIFFERENT_COUNTS
+    if any(signal.code == "part_identity" for signal in ctx.status.review_signals):
+        raise StageError(
+            "unsafe part identity: part IDs must be unique and match the score-part "
+            "declarations; correct the MusicXML part IDs or rerun OMR before instrument fixup"
+        )
     expected = ctx.status.expected_measures
     read = "/".join(map(str, counts)) or "0"
     if ctx.parts is not None:
@@ -320,6 +333,40 @@ def _durations(ctx: _Context) -> str:
     elif any(c != expected for c in counts):
         detail += " (count differs)"
     return detail
+
+
+def _annotate_review_signals(root: ET.Element, signals: tuple[ReviewSignal, ...]) -> None:
+    """Insert warnings in signal order, with score-wide warnings in the first part."""
+    parts = root.findall("part")
+    # Count warnings belong to the whole part, so anchor them at its first bar.
+    # The annotation deliberately makes no claim about where recognition lost content.
+    insertion_positions: dict[ET.Element, int] = {}
+    for signal in signals:
+        for part in parts if signal.part_id else parts[:1]:
+            if signal.part_id and signal.part_id != part.get("id", ""):
+                continue
+            measures = part.findall("measure")
+            target_measure = (
+                next((m for m in measures if m.get("number", "") == signal.measure), None)
+                if signal.measure
+                else next(iter(measures), None)
+            )
+            if target_measure is not None:
+                direction = ET.Element("direction", placement="above")
+                ET.SubElement(ET.SubElement(direction, "direction-type"), "words").text = (
+                    "Review: " + signal.detail
+                )
+                if target_measure not in insertion_positions:
+                    at = 0
+                    while at < len(target_measure) and target_measure[at].tag in (
+                        "print",
+                        "attributes",
+                    ):
+                        at += 1
+                    insertion_positions[target_measure] = at
+                at = insertion_positions[target_measure]
+                target_measure.insert(at, direction)
+                insertion_positions[target_measure] = at + 1
 
 
 def _fixup(ctx: _Context) -> str:
@@ -357,6 +404,7 @@ def _fixup(ctx: _Context) -> str:
             f"{ctx.instrument.id} applied to part {part_id}, {len(result.marked)} mark(s)"
         )
         details.extend(prefix + r.describe() for r in result.rewrites)
+    _annotate_review_signals(root, ctx.status.review_signals)
     target = ctx.paths.musicxml
     tmp = target.with_name(f".{target.name}.tmp")
     try:
