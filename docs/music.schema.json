@@ -18,6 +18,11 @@
         "properties": {
           "pdf": {"type": "string", "minLength": 1},
           "instrument": {"enum": ["bb-trumpet", "trombone", "flute", "alto-saxophone", "tenor-saxophone", "tuba"]},
+          "parts": {
+            "type": "array", "minItems": 1,
+            "items": {"type": "string", "minLength": 1, "pattern": "\\S"},
+            "description": "Part names in score order; omitted means exactly one part with the instrument name"
+          },
           "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
           "audiveris_options": {
             "type": "object",

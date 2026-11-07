@@ -237,3 +237,46 @@ def test_corrupt_member_raises(tmp_path, member):
     path.write_bytes(bytes(data))
     with pytest.raises(MscxCheckError, match=f"{re.escape(member)}: cannot read zip member"):
         check_mscz(path, INSTRUMENTS["flute"])
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "failure"),
+    [
+        ("Trumpet 2", "Wrong name", "part_name"),
+        ('id="bb-trumpet"', 'id="flute"', "instrument"),
+        ("<transposeChromatic>-2", "<transposeChromatic>0", "transposition"),
+        ("<transposingClefType>G", "<transposingClefType>F", "clef"),
+    ],
+)
+def test_each_multipart_property_is_checked(tmp_path, before, after, failure):
+    xml = two_trumpet_mscx()
+    # Change only the second occurrence for properties shared by both parts.
+    at = xml.rfind(before)
+    assert at >= 0
+    xml = xml[:at] + xml[at:].replace(before, after, 1)
+    result = check_mscz(
+        write_mscz(tmp_path / "two.mscz", xml),
+        INSTRUMENTS["bb-trumpet"],
+        parts=("Trumpet 1", "Trumpet 2"),
+    )
+    assert [c.name for c in result.failures] == [f"part[2].{failure}"]
+
+
+def test_multipart_final_count_mismatch(tmp_path):
+    result = check_mscz(
+        mscz_for(tmp_path, "bb-trumpet"),
+        INSTRUMENTS["bb-trumpet"],
+        parts=(INSTRUMENTS["bb-trumpet"].name_pt, "Trumpet 2"),
+    )
+    assert not result.passed
+    assert by_name(result)["part_count"].found == "1"
+    assert by_name(result)["part_count"].expected == "2"
+    assert by_name(result)["part[2].instrument"].found == "no <Part>"
+
+
+def two_trumpet_mscx():
+    first = part_xml("bb-trumpet", "Trumpet 1", -1, -2)
+    second = part_xml("bb-trumpet", "Trumpet 2", -1, -2).replace('id="1"', 'id="2"')
+    xml = mscx_xml(first + second)
+    staff = xml[xml.index('<Staff id="1"><Measure>') : xml.index("</Score>")]
+    return xml.replace("</Score>", staff.replace('id="1"', 'id="2"') + "</Score>")

@@ -7,9 +7,10 @@ import pytest
 
 from omr_ingestor import pipeline
 from omr_ingestor.audiveris import AUDIVERIS_ENV_VAR
-from omr_ingestor.batch import FAILED, PASSED, BatchItem, check_cross_part
-from omr_ingestor.cli import main
+from omr_ingestor.batch import FAILED, PASSED, BatchItem, BatchResult, check_cross_part
+from omr_ingestor.cli import _print_batch, main
 from omr_ingestor.musescore import MUSESCORE_ENV_VAR
+from omr_ingestor.pipeline import UncountedReason
 from omr_ingestor.status import read_status
 from omr_ingestor.xsd import XSD_ENV_VAR
 from tests.musicxml_builders import DEFAULT_ATTRS, measure, note, score
@@ -147,6 +148,10 @@ def test_a_failing_item_does_not_stop_the_others(batch: Batch, capsys):
     assert "[1/3] song-trumpet: failed at audiveris:" in out
     assert "song-trumpet   bb-trumpet  failed (audiveris)     -         3        -         -" in out
     assert "error: 2 of 3 item(s) did not pass: song-trumpet, song-trombone" in err
+    assert (
+        "warning: measures not counted (failed before durations): song-trumpet, song-trombone"
+    ) in err
+    assert "parts read different" not in err
 
 
 def test_item_directory_conflict_does_not_abort_batch(batch: Batch):
@@ -336,3 +341,33 @@ def test_cross_part_tie_lists_every_counted_part():
     assert check.not_counted == ("c",)
     assert check.expected_agree is False
     assert check.all_agree is False
+
+
+def test_batch_warns_once_for_each_uncounted_cause(tmp_path, capsys):
+    items = (
+        BatchItem("early.pdf", "bb-trumpet", 3, FAILED, failed_stage="audiveris"),
+        BatchItem(
+            "multi.pdf",
+            "bb-trumpet",
+            3,
+            PASSED,
+            uncounted_reason=UncountedReason.DIFFERENT_COUNTS,
+        ),
+        BatchItem(
+            "other-multi.pdf",
+            "bb-trumpet",
+            3,
+            FAILED,
+            suspect_count=1,
+            failed_stage="fixup",
+            uncounted_reason=UncountedReason.DIFFERENT_COUNTS,
+        ),
+    )
+    _print_batch(BatchResult("Synthetic", items, check_cross_part(items), tmp_path / "batch.json"))
+    warnings = [
+        line for line in capsys.readouterr().err.splitlines() if line.startswith("warning:")
+    ]
+    assert warnings == [
+        "warning: measures not counted (failed before durations): early",
+        "warning: parts read different measure counts: multi, other-multi",
+    ]

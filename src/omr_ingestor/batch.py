@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from omr_ingestor.manifest import ManifestError, load_manifest
-from omr_ingestor.pipeline import PipelineIOError, PipelineSetupError, run_item
+from omr_ingestor.pipeline import PipelineIOError, PipelineSetupError, UncountedReason, run_item
 from omr_ingestor.status import MeasureCount, StageState, write_text_atomic
 
 BATCH_NAME = "batch.json"
@@ -44,6 +44,7 @@ class BatchItem:
     status_file: Path | None = None  # None when the item did not start (setup error)
     tool_versions: dict[str, str] = field(default_factory=dict)
     audiveris_options: dict[str, str] | None = None  # None when the item did not start
+    uncounted_reason: UncountedReason | None = UncountedReason.BEFORE_DURATIONS
 
     @property
     def stem(self) -> str:
@@ -71,7 +72,8 @@ class CrossPartCheck:
     reference_count: int | None
     differ_from_others: tuple[str, ...]  # stems; every counted part when there is a tie
     differ_from_expected: tuple[str, ...]  # stems whose count is not their expected_measures
-    not_counted: tuple[str, ...]  # stems with no measure count (failed before durations)
+    # Stems with unavailable durations or differing counts within a multipart item.
+    not_counted: tuple[str, ...]
     expected_agree: bool  # the manifest gives every part the same expected_measures
 
 
@@ -131,6 +133,7 @@ def _run_one(manifest_path: Path, index: int, entry: dict[str, Any], output_dir:
         item,
         status=PASSED if result.ok else FAILED,
         measures_read=status.measures_read,
+        uncounted_reason=result.uncounted_reason,
         suspect_count=len(status.suspect_measures) if counted else None,
         failed_stage=None if failed is None else failed.name,
         error=None if failed is None else failed.detail,

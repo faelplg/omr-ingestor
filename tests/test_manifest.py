@@ -105,3 +105,9 @@ def test_cli_validate(capsys, example, write_json):
     example["items"][0]["instrument"] = "piano"
     assert main(["validate", str(write_json(example))]) == 1
     assert "items[0].instrument" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("parts", [[], "Trumpet", None, [1], [""], ["   "]])
+def test_invalid_parts_are_rejected(example, parts):
+    example["items"][0]["parts"] = parts
+    assert any("parts" in p for p in problems_of(example))

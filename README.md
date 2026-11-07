@@ -1,6 +1,6 @@
 # omr-ingestor
 
-Local pipeline that takes a sheet-music PDF (one part, for one of 6 wind instruments), runs OMR on it, and produces a MuseScore `.mscz` file with the right instrument (transposition, clef, name) and the "Estilo 2026" style applied.
+Local pipeline that takes a sheet-music PDF (one or more parts, for one of 6 wind instruments), runs OMR on it, and produces a MuseScore `.mscz` file with the right instrument (transposition, clef, name) and the "Estilo 2026" style applied.
 
 ## Status
 
@@ -10,7 +10,7 @@ Every stage of `docs/architecture.md` is implemented, per item (`run`) and over 
 
 - Runs on the author's Mac (arm64), from the command line.
 - Input: a `music.json` manifest (see `docs/music.schema.json` and `examples/music.example.json`) that lists the PDFs, the instrument of each one (provided at submission time, never guessed) and the expected number of measures.
-- Output: one `.mscz` per part plus a `status.json` per item, in `output/` (kept out of git).
+- Output: one `.mscz` per PDF plus a `status.json` per item, in `output/` (kept out of git).
 - Stages and decisions: `docs/architecture.md`.
 
 ## Usage
@@ -22,6 +22,24 @@ uv run omr-ingestor validate music.json          # check the manifest
 uv run omr-ingestor run -o output music.json 0   # one item: index, pdf or pdf stem
 uv run omr-ingestor batch -o output music.json   # every item, then the cross-part check
 ```
+
+### Multiple parts in one PDF
+
+An item can supply `"parts": ["Trumpet 1", "Trumpet 2"]` (see the trumpet item in
+`examples/music.example.json`). This non-empty list names parts in score order.
+The score must contain exactly that many parts; a mismatch fails the fixup stage.
+Each part receives the item's instrument, clef, transposition and sound, with its
+configured display name. Each part must have one staff. Omitting `parts` keeps the
+single-part behavior and the instrument's default name.
+
+`expected_measures` applies to each part. Duration details and suspects identify
+part IDs and report missing or extra measures for each part without failing the run.
+When all parts have the same count, that count is recorded as `measures_read` in
+status and `measures.read` in the batch summary, and included in the batch cross-part
+comparison. If counts differ, these fields are `null` and batch lists the item as
+`not_counted`; consult the durations detail for each count. The final MuseScore
+check verifies every configured part's name, instrument, transposition and clef.
+One `.mscz` contains all parts.
 
 ### Audiveris settings per input
 

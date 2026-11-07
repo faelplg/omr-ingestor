@@ -18,7 +18,7 @@ from omr_ingestor.xsd import XSD_ENV_VAR
 from tests.fake_tools import make_tool
 from tests.musicxml_builders import DEFAULT_ATTRS, measure, multiple_rest, note, rest, score
 from tests.test_fixup import omr_score, start, stop, volta_score
-from tests.test_mscx_check import mscx_xml, part_xml, style_xml
+from tests.test_mscx_check import mscx_xml, part_xml, style_xml, two_trumpet_mscx
 
 pytestmark = pytest.mark.skipif(shutil.which("xmllint") is None, reason="xmllint not installed")
 
@@ -445,3 +445,145 @@ def test_select_item():
         select_item(manifest, "3")
     with pytest.raises(PipelineSetupError, match="no item matches"):
         select_item(manifest, "z")
+
+
+def multipart_xml():
+    return score(
+        {
+            "P1": [measure(1, DEFAULT_ATTRS + note(4)), measure(2, note(4))],
+            "P2": [measure(1, DEFAULT_ATTRS + note(4)), measure(2, note(2))],
+        }
+    )
+
+
+def configure_parts(setup, parts):
+    manifest = json.loads(setup.manifest.read_text())
+    if parts is not None:
+        manifest["items"][0]["parts"] = parts
+    setup.manifest.write_text(json.dumps(manifest))
+
+
+def test_two_parts_fixup_and_final_check(setup, monkeypatch):
+    configure_parts(setup, ["Trumpet 1", "Trumpet 2"])
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [multipart_xml()])))
+    monkeypatch.setenv(MUSESCORE_ENV_VAR, str(fake_musescore(setup.bin, two_trumpet_mscx())))
+    assert setup.run() == 0
+    fixed = read_musicxml(setup.item_dir / f"{STEM}.musicxml")
+    assert [p.findtext("part-name") for p in fixed.findall("part-list/score-part")] == [
+        "Trumpet 1",
+        "Trumpet 2",
+    ]
+    for part in fixed.findall("part"):
+        assert part.findtext("measure/attributes/clef/sign") == "G"
+        assert part.findtext("measure/attributes/clef/line") == "2"
+        assert part.findtext("measure/attributes/transpose/chromatic") == "-2"
+        assert part.findtext("measure/attributes/transpose/diatonic") == "-1"
+    assert [
+        p.findtext("score-instrument/instrument-sound")
+        for p in fixed.findall("part-list/score-part")
+    ] == ["brass.trumpet.bflat"] * 2
+    assert fixed.find("part[@id='P1']/measure/direction") is None
+    mark = "part[@id='P2']/measure[@number='2']/direction/direction-type/rehearsal"
+    assert fixed.findtext(mark) == "?"
+    status = setup.status()
+    assert status.measure_count == MeasureCount(read=2, expected=3, missing=1)
+    assert len(status.suspect_measures) == 1
+    assert status.suspect_measures[0].detail.startswith("part P2 measure 2:")
+    assert "part P1: 2 measure(s) read, 3 expected, 1 missing" in status.stage("durations").detail
+    assert "part P2: 2 measure(s) read, 3 expected, 1 missing" in status.stage("durations").detail
+    assert "part_count: pass (found 2, expected 2)" in status.stage("mscx_check").detail
+    assert all(state == "passed" for state in states(status).values())
+
+
+@pytest.mark.parametrize("parts", [None, ["Only one"], ["One", "Two", "Three"]])
+def test_multipart_count_mismatch_fails_before_writing(setup, monkeypatch, parts):
+    configure_parts(setup, parts)
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [multipart_xml()])))
+    assert setup.run() == 1
+    status = setup.status()
+    assert status.stage("fixup").status.value == "failed"
+    assert "score has 2 parts" in status.stage("fixup").detail
+    if parts is not None:
+        assert f"manifest parts expects {len(parts)}" in status.stage("fixup").detail
+    else:
+        assert status.stage("fixup").detail == (
+            "score has 2 parts ['P1', 'P2']; list their names in the item's \"parts\""
+        )
+    assert status.stage("musescore").status.value == "skipped"
+    assert not (setup.item_dir / f"{STEM}.musicxml").exists()
+
+
+@pytest.mark.parametrize("second_count", [1, 2, 4])
+def test_multipart_measure_counts_and_batch_summary(setup, monkeypatch, second_count, capsys):
+    configure_parts(setup, ["Trumpet 1", "Trumpet 2"])
+    xml = score(
+        {
+            pid: [
+                measure(n, (DEFAULT_ATTRS if n == 1 else "") + note(4)) for n in range(1, count + 1)
+            ]
+            for pid, count in (("P1", 2), ("P2", second_count))
+        }
+    )
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [xml])))
+    monkeypatch.setenv(MUSESCORE_ENV_VAR, str(fake_musescore(setup.bin, two_trumpet_mscx())))
+    assert main(["batch", "-o", str(setup.output), str(setup.manifest)]) == 0
+    status = setup.status()
+    delta = 3 - second_count
+    difference = f"{delta} missing" if delta >= 0 else f"{-delta} extra"
+    assert status.stage("durations").detail == (
+        "0 suspect measure(s); part P1: 2 measure(s) read, 3 expected, 1 missing; "
+        f"part P2: {second_count} measure(s) read, 3 expected, {difference}"
+    )
+    summary = json.loads((setup.output / "batch.json").read_text())
+    cross = summary["cross_part"]
+    warnings = capsys.readouterr().err
+    if second_count == 2:
+        assert status.measure_count == MeasureCount(read=2, expected=3, missing=1)
+        assert summary["items"][0]["measures"] == {"read": 2, "expected": 3, "missing": 1}
+        assert cross["not_counted"] == []
+        assert cross["differ_from_expected"] == [STEM]
+        assert cross["reference_count"] == 2
+        assert "warning:" in warnings
+        assert "expected" in warnings
+    else:
+        assert status.measures_read is None
+        assert cross["not_counted"] == [STEM]
+        assert f"warning: parts read different measure counts: {STEM}" in warnings
+        assert "failed before durations" not in warnings
+
+
+@pytest.mark.parametrize("parts", [None, ["Trumpet 1", "Trumpet 2"]])
+def test_score_without_parts_has_its_own_error(setup, monkeypatch, parts):
+    configure_parts(setup, parts)
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [score({})])))
+    assert setup.run() == 1
+    status = setup.status()
+    assert status.stage("fixup").detail == "score has no parts"
+    assert status.stage("musescore").status.value == "skipped"
+
+
+@pytest.mark.parametrize("second_count", [1, 2])
+def test_batch_multipart_without_configuration_reports_missing_parts(
+    setup, monkeypatch, capsys, second_count
+):
+    xml = score(
+        {
+            pid: [
+                measure(n, (DEFAULT_ATTRS if n == 1 else "") + note(4)) for n in range(1, count + 1)
+            ]
+            for pid, count in (("P1", 2), ("P2", second_count))
+        }
+    )
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [xml])))
+    assert main(["batch", "-o", str(setup.output), str(setup.manifest)]) == 1
+    status = setup.status()
+    assert status.measures_read is None
+    assert status.stage("fixup").detail == (
+        "score has 2 parts ['P1', 'P2']; list their names in the item's \"parts\""
+    )
+    warnings = capsys.readouterr().err
+    assert (
+        f'warning: multipart score requires the item\'s "parts" configuration: {STEM}' in warnings
+    )
+    assert "parts read different measure counts" not in warnings
+    assert "failed before durations" not in warnings

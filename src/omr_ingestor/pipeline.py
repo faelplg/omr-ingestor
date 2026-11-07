@@ -25,18 +25,19 @@ import time
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 from omr_ingestor import mscx_check, musescore
 from omr_ingestor.audiveris import AudiverisError, resolve_audiveris, run_audiveris
 from omr_ingestor.durations import DurationReport, check_durations
-from omr_ingestor.fixup import fix_instrument_file
+from omr_ingestor.fixup import fix_instrument
 from omr_ingestor.instruments import Instrument, InstrumentsError, load_instruments
 from omr_ingestor.manifest import ManifestError, load_manifest
 from omr_ingestor.mscx_check import A5_LANDSCAPE, MM_PER_INCH, MscxCheckError, PageSize
 from omr_ingestor.musescore import MuseScoreError, resolve_musescore
-from omr_ingestor.musicxml import MusicXMLError, find_part, read_musicxml
+from omr_ingestor.musicxml import MusicXMLError, part_ids, read_musicxml, write_musicxml
 from omr_ingestor.status import (
     STAGE_NAMES,
     ItemStatus,
@@ -112,10 +113,18 @@ class ItemPaths:
         )
 
 
+class UncountedReason(StrEnum):
+    BEFORE_DURATIONS = "measures not counted (failed before durations)"
+    MISSING_PARTS = 'multipart score requires the item\'s "parts" configuration'
+    DIFFERENT_COUNTS = "parts read different measure counts"
+    NO_PARTS = "score has no parts"
+
+
 @dataclass(frozen=True, slots=True)
 class RunResult:
     paths: ItemPaths
     status: ItemStatus
+    uncounted_reason: UncountedReason | None = UncountedReason.BEFORE_DURATIONS
 
     @property
     def ok(self) -> bool:
@@ -231,8 +240,10 @@ class _Context:
     page_size: PageSize
     paths: ItemPaths
     status: ItemStatus
+    parts: tuple[str, ...] | None = None
     raw_musicxml: Path | None = None
     report: DurationReport | None = None
+    uncounted_reason: UncountedReason | None = UncountedReason.BEFORE_DURATIONS
 
     def save(self) -> None:
         write_status(self.status, self.paths.status)
@@ -272,14 +283,34 @@ def _durations(ctx: _Context) -> str:
     ctx.report = report
     suspects = report.suspects
     counts = [len(part.findall("measure")) for part in root.findall("part")]
-    # The fix-up works on one part; with several there is no single count to record.
+    # A shared count lets batch compare multipart items with the rest of the piece.
     ctx.status = replace(
         ctx.status,
         suspect_measures=tuple(SuspectMeasure(m.number, m.describe()) for m in suspects),
-        measures_read=counts[0] if len(counts) == 1 else None,
+        measures_read=counts[0]
+        if len(counts) == 1 or (ctx.parts is not None and len(set(counts)) == 1)
+        else None,
     )
+    if ctx.status.measures_read is not None:
+        ctx.uncounted_reason = None
+    elif not counts:
+        ctx.uncounted_reason = UncountedReason.NO_PARTS
+    elif ctx.parts is None:
+        ctx.uncounted_reason = UncountedReason.MISSING_PARTS
+    else:
+        ctx.uncounted_reason = UncountedReason.DIFFERENT_COUNTS
     expected = ctx.status.expected_measures
     read = "/".join(map(str, counts)) or "0"
+    if ctx.parts is not None:
+        details = []
+        for part, count in zip(root.findall("part"), counts, strict=True):
+            missing = expected - count
+            difference = f"{missing} missing" if missing >= 0 else f"{-missing} extra"
+            details.append(
+                f"part {part.get('id', '')}: {count} measure(s) read, "
+                f"{expected} expected, {difference}"
+            )
+        return "; ".join([f"{len(suspects)} suspect measure(s)", *details])
     detail = f"{len(suspects)} suspect measure(s); {read} measure(s) read, {expected} expected"
     if (count := ctx.status.measure_count) is not None:
         if count.missing >= 0:
@@ -292,22 +323,52 @@ def _durations(ctx: _Context) -> str:
 
 
 def _fixup(ctx: _Context) -> str:
-    part_id = find_part(read_musicxml(ctx.raw_musicxml), None).get("id", "")
-    suspects = ctx.report.suspect_numbers(part_id)
+    root = read_musicxml(ctx.raw_musicxml)
+    parts = root.findall("part")
+    if not parts:
+        raise StageError("score has no parts")
+    if ctx.parts is None:
+        if len(parts) != 1:
+            raise StageError(
+                f"score has {len(parts)} parts {part_ids(root)}; "
+                'list their names in the item\'s "parts"'
+            )
+        names = [None]
+    else:
+        if len(parts) != len(ctx.parts):
+            raise StageError(
+                f"score has {len(parts)} parts; manifest parts expects {len(ctx.parts)}"
+            )
+        names = ctx.parts
+    details = []
+    added = []
+    for part, name in zip(parts, names, strict=True):
+        part_id = part.get("id", "")
+        result = fix_instrument(
+            root,
+            ctx.instrument,
+            part_id=part_id,
+            part_name=name,
+            suspect_measures=ctx.report.suspect_numbers(part_id),
+        )
+        prefix = f"part {part_id}: " if ctx.parts is not None else ""
+        added.extend(SuspectMeasure(s.measure, prefix + s.reason) for s in result.suspects)
+        details.append(
+            f"{ctx.instrument.id} applied to part {part_id}, {len(result.marked)} mark(s)"
+        )
+        details.extend(prefix + r.describe() for r in result.rewrites)
     target = ctx.paths.musicxml
     tmp = target.with_name(f".{target.name}.tmp")
     try:
-        result = fix_instrument_file(
-            ctx.raw_musicxml, tmp, ctx.instrument, part_id=part_id, suspect_measures=suspects
-        )
+        write_musicxml(root, tmp)
         os.replace(tmp, target)
     finally:
         tmp.unlink(missing_ok=True)
-    if result.suspects:
-        added = tuple(SuspectMeasure(s.measure, s.reason) for s in result.suspects)
-        ctx.status = replace(ctx.status, suspect_measures=ctx.status.suspect_measures + added)
-    detail = f"{ctx.instrument.id} applied to part {part_id}, {len(result.marked)} mark(s)"
-    return "; ".join([detail, *(r.describe() for r in result.rewrites)])
+    if added:
+        ctx.status = replace(
+            ctx.status, suspect_measures=ctx.status.suspect_measures + tuple(added)
+        )
+    return "; ".join(details)
 
 
 def _xsd_after_fixup(ctx: _Context) -> str:
@@ -329,7 +390,9 @@ def _mscx_check(ctx: _Context) -> str:
     """Check the staged .mscz; publish it on success, move it aside as rejected otherwise."""
     paths = ctx.paths
     try:
-        result = mscx_check.check_mscz(paths.staged_mscz, ctx.instrument, page_size=ctx.page_size)
+        result = mscx_check.check_mscz(
+            paths.staged_mscz, ctx.instrument, page_size=ctx.page_size, parts=ctx.parts
+        )
         if not result.passed:
             raise StageError("; ".join(c.describe() for c in result.failures))
     except (MscxCheckError, StageError) as exc:
@@ -382,6 +445,7 @@ def _prepare(manifest_path: Path, selector: str, output_dir: Path) -> _Context:
     )
     return _Context(
         tools=tools,
+        parts=tuple(item["parts"]) if "parts" in item else None,
         instrument=instruments[item["instrument"]],
         pdf=pdf,
         style=style,
@@ -419,4 +483,4 @@ def _run_stages(ctx: _Context) -> RunResult:
             Stage(name, StageState.PASSED, time.monotonic() - start, detail)
         )
         ctx.save()
-    return RunResult(ctx.paths, ctx.status)
+    return RunResult(ctx.paths, ctx.status, ctx.uncounted_reason)

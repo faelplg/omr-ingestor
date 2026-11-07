@@ -111,13 +111,17 @@ def _score_part(root: ET.Element, part_id: str) -> ET.Element:
 
 
 def _set_name_and_sound(
-    score_part: ET.Element, part: ET.Element, instrument: Instrument, sound: Sound
+    score_part: ET.Element,
+    part: ET.Element,
+    instrument: Instrument,
+    sound: Sound,
+    part_name: str | None = None,
 ) -> None:
     name = score_part.find("part-name")
     if name is None:
         name = ET.Element("part-name")
         _insert_ordered(score_part, name, _SCORE_PART_ORDER)
-    name.text = instrument.name_pt
+    name.text = part_name if part_name is not None else instrument.name_pt
     # OMR display names and abbreviations would show the old name; the table has no
     # abbreviation to put in their place.
     for tag in ("part-name-display", "part-abbreviation", "part-abbreviation-display"):
@@ -418,6 +422,7 @@ def fix_instrument(
     instrument: Instrument,
     *,
     part_id: str | None = None,
+    part_name: str | None = None,
     suspect_measures: Iterable[str] = (),
     mark_text: str = DEFAULT_MARK,
 ) -> FixupResult:
@@ -426,6 +431,7 @@ def fix_instrument(
     part_id=None works on single-part scores. suspect_measures are measure numbers
     (as in DurationReport.suspect_numbers); each gets a rehearsal mark with mark_text,
     as do the volta endings fix_volta_endings rewrote or found suspect.
+    part_name overrides the displayed part name, keeping the instrument sound/name.
     The page layout is removed from the whole score, since it is shared by all parts.
     """
     try:
@@ -449,7 +455,7 @@ def fix_instrument(
         )
     )
     _add_marks(part, marked, mark_text)
-    _set_name_and_sound(score_part, part, instrument, sound)
+    _set_name_and_sound(score_part, part, instrument, sound, part_name)
     _set_clef_and_transpose(part, instrument)
     remove_page_layout(root)
     return FixupResult(tuple(rewrites), tuple(volta_suspects), marked)
@@ -461,6 +467,7 @@ def fix_instrument_file(
     instrument: Instrument,
     *,
     part_id: str | None = None,
+    part_name: str | None = None,
     suspect_measures: Iterable[str] = (),
     mark_text: str = DEFAULT_MARK,
 ) -> FixupResult:
@@ -470,6 +477,7 @@ def fix_instrument_file(
         root,
         instrument,
         part_id=part_id,
+        part_name=part_name,
         suspect_measures=suspect_measures,
         mark_text=mark_text,
     )
