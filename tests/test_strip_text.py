@@ -5,6 +5,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
+from omr_ingestor.durations import check_review_signals
 from omr_ingestor.fixup import TEXT_REMOVAL_CATEGORIES, strip_text
 from omr_ingestor.musicxml import parse_musicxml, write_musicxml
 from omr_ingestor.xsd import validate_xsd
@@ -198,3 +199,44 @@ def test_notes_without_text_remain_identical_including_empty_notations():
     before = xml(root.find(".//note"))
     strip_text(root)
     assert xml(root.find(".//note")) == before
+
+
+@pytest.mark.parametrize("text", ["D.S. al Coda", "Fine", "To Coda"])
+def test_words_only_navigation_direction_stays_unchanged(text):
+    direction = (
+        '<direction placement="above"><direction-type><words>solo</words></direction-type>'
+        "<direction-type><words>" + text + "</words></direction-type>"
+        "<offset>2</offset><voice>1</voice><staff>1</staff></direction>"
+    )
+    root = parse_musicxml(score({"P1": [measure(1, direction)]}))
+    before = xml(root)
+    assert strip_text(root)["words"] == 0
+    assert xml(root) == before
+
+
+@pytest.mark.parametrize("text,is_navigation", [("D.S. al Coda", True), ("finally codas", False)])
+def test_review_signal_and_cleaned_direction_agree(text, is_navigation):
+    root = parse_musicxml(
+        score(
+            {
+                "P1": [
+                    measure(
+                        1,
+                        "<direction><direction-type><words>"
+                        + text
+                        + "</words></direction-type></direction>"
+                        "<note><rest/><duration>4</duration><lyric><text>Fine</text></lyric></note>",
+                    )
+                ]
+            }
+        )
+    )
+    signals = check_review_signals(root, 1)
+    assert len(signals) == 1 and signals[0].code == "navigation_lyric"
+    signal_has_navigation = "no navigation direction found" not in signals[0].detail
+    assert signal_has_navigation == is_navigation
+    removals = strip_text(root)
+    cleaned_has_direction = root.find(".//direction") is not None
+    assert cleaned_has_direction == signal_has_navigation
+    assert removals["words"] == (0 if is_navigation else 1)
+    assert removals["lyrics"] == 1

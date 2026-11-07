@@ -93,8 +93,10 @@ Encoding metadata, part names and instrument data remain. Clefs, signatures, not
 rests, accidentals, articulations, ties, slurs, tuplets, dynamics, barlines, repeats,
 voltas and navigation (`sound`, segno and coda) retain their musical content.
 The whole direction, including text and positioning, is kept when its `sound`
-has `dacapo`, `dalsegno`, `fine`, `tocoda`, `coda` or `segno`. Other words, such as
-tempo text, "rit." and "solo", are removed.
+has `dacapo`, `dalsegno`, `fine`, `tocoda`, `coda` or `segno`, or when any of its
+words matches the shared navigation pattern used by review signals (for example
+"D.S. al Coda", "D.C.", "Fine" or "To Coda"), even without a `sound`. Other words,
+such as tempo text, "rit." and "solo", are removed.
 Instrument and volta fixes still apply as described above.
 
 Set `"keep_text": true` on an individual manifest item to keep its original text.

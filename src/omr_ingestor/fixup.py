@@ -21,6 +21,7 @@ from omr_ingestor.musicxml import (
     read_musicxml,
     write_musicxml,
 )
+from omr_ingestor.navigation import _NAVIGATION, _NAVIGATION_SOUND_ATTRIBUTES
 
 
 class FixupError(MusicXMLError):
@@ -214,14 +215,13 @@ def remove_page_layout(root: ET.Element) -> None:
 # Counts refer to removed elements, not their descendant nodes or empty wrappers.
 TEXT_REMOVAL_CATEGORIES = ("credits", "headers", "lyrics", "words", "rehearsals", "technical")
 _TEXT_TECHNICAL = ("fingering", "pluck", "other-technical")
-_NAVIGATION_SOUND_ATTRIBUTES = ("dacapo", "dalsegno", "fine", "tocoda", "coda", "segno")
 
 
 def strip_text(root: ET.Element, *, keep_text: bool = False) -> dict[str, int]:
     """Clean a raw export before adding our review annotations or applying instruments.
 
     Apply once to the whole score, including every part. Directions tied to a
-    navigation sound remain intact, including their text and positioning.
+    navigation sound or navigation-like words remain intact, including positioning.
     """
     counts = dict.fromkeys(TEXT_REMOVAL_CATEGORIES, 0)
     if keep_text:
@@ -255,9 +255,10 @@ def strip_text(root: ET.Element, *, keep_text: bool = False) -> dict[str, int]:
     for measure in root.iterfind("part/measure"):
         for direction in measure.findall("direction"):
             if any(
-                attribute in sound.attrib
+                _NAVIGATION_SOUND_ATTRIBUTES.intersection(sound.attrib)
                 for sound in direction.findall("sound")
-                for attribute in _NAVIGATION_SOUND_ATTRIBUTES
+            ) or any(
+                _NAVIGATION.search(words.text or "") for words in direction.findall(".//words")
             ):
                 continue
             for kind in direction.findall("direction-type"):
