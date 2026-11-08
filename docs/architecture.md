@@ -57,7 +57,9 @@ flowchart TB
    `measure_count_mismatch`, `part_count_mismatch`, `part_identity` and
    `navigation_lyric` review signals from the raw export. Unsafe part IDs fail
    this stage after the signal is saved, before fixup can transform an ambiguous
-   part. A count mismatch or navigation warning alone does not fail conversion.
+   part. `measure_count_mismatch` and `navigation_lyric` warnings alone do not
+   fail conversion. A `part_count_mismatch` is recorded here, but an incompatible
+   number of parts fails the later fixup stage.
 4. **Fixup and XSD again.** Requires one part or exactly the count in the item's
    `parts` list, with one staff per part. Applies instrument metadata, clef,
    transposition, sound and configured display names without changing pitches.
