@@ -158,12 +158,30 @@ If this ever becomes a service for other people, review Audiveris's AGPL first.
 
 ## Documentation checksums
 
-`MANIFEST.sha256` stays docs-only in scope: it covers this README, `docs/`, and
-its supporting manifest example, instrument catalog and `.gitignore`. It does
-not cover `src/`, `tests/`, `pyproject.toml` or generated run outputs, and is not
-a complete release-integrity manifest. Regenerate it after changing a listed
-file or adding a documentation file, then verify with:
+`MANIFEST.sha256` stays docs-only in scope, covering only the documentation and
+supporting files explicitly listed below. It excludes `src/`, `tests/`,
+`pyproject.toml` and generated run outputs; it is not a complete release-integrity
+manifest. New files in `docs/` are not included automatically: add them to the
+regeneration command's file list when extending coverage.
+
+From the repository root, regenerate after changing a listed file:
+
+```sh
+shasum -a 256 \
+  ./.gitignore \
+  ./README.md \
+  ./docs/accuracy.md \
+  ./docs/architecture.md \
+  ./docs/music.schema.json \
+  ./examples/music.example.json \
+  ./instruments.json > MANIFEST.sha256
+```
+
+Then verify, also from the repository root:
 
 ```sh
 shasum -a 256 -c MANIFEST.sha256
 ```
+
+CI does not yet run this check; [#31](https://github.com/faelplg/omr-ingestor/issues/31)
+tracks adding it.
