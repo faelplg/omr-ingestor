@@ -154,3 +154,15 @@ The pipeline calls separately installed programs from the command line. None of 
 | MuseScore Studio | 4.7.5 | GPL v3 | MusicXML → `.mscz` with style (`-S`, `-o`) |
 
 If this ever becomes a service for other people, review Audiveris's AGPL first.
+
+## Documentation checksums
+
+`MANIFEST.sha256` stays docs-only in scope: it covers this README, `docs/`, and
+its supporting manifest example, instrument catalog and `.gitignore`. It does
+not cover `src/`, `tests/`, `pyproject.toml` or generated run outputs, and is not
+a complete release-integrity manifest. Regenerate it after changing a listed
+file or adding a documentation file, then verify with:
+
+```sh
+shasum -a 256 -c MANIFEST.sha256
+```
