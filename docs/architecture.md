@@ -1,69 +1,138 @@
 # omr-ingestor architecture
 
-Planned flow. The diagram is **inferred**: only stage 5 (`-S`) has been tested; the rest has not run. Source: OMR study (v4, 2026-11-04).
+All six stages are implemented on main for a single manifest item (`run`) and for
+all items (`batch`). Automated tests exercise the pipeline with fake Audiveris and
+MuseScore executables. Real-tool observations below are bounded measurements, not
+a claim that every converted score is musically correct.
 
 ```mermaid
 flowchart TB
-  subgraph MAN["Input (author's Mac, PDFs never leave it)"]
-    MJ["music.json (manifest)<br/>items: PDF, instrument, sha256<br/>expected measures, style path"]
+  MJ["music.json: PDFs, checksums, instrument, expected measures<br/>style, optional parts, audiveris_options and keep_text"]
+  TAB["instruments.json: six supported instruments"]
+
+  subgraph PIPE["Per item: one output folder per PDF stem, all processing local"]
+    AUD["1. Audiveris 5.11.0: -batch -export<br/>per-item constants; require exactly one movement"]
+    UNZ["Extract declared MusicXML root from MXL"]
+    XSD1["2. Validate raw MusicXML: local 4.0 XSD"]
+    DUR["3. Duration and review checks<br/>multi-rest suspects, counts, part IDs, navigation lyrics"]
+    FIX["4. Instrument fixup and layout removal<br/>text cleanup unless keep_text; rejoin unambiguous voltas<br/>add suspect and review marks"]
+    XSD2["Validate fixed MusicXML: local 4.0 XSD"]
+    MS["5. MuseScore 4.7.5: -S style -o staged.mscz"]
+    VF["6. Check archived MSCX: every part's instrument,<br/>name, transposition, clef and style page size"]
+    OUT["Publish checked .mscz"]
   end
 
-  subgraph PIPE["Per-item pipeline (one folder per part, idempotent)"]
-    AUD["1. Audiveris 5.11.0<br/>-batch -export<br/>checks the number of .mxl files, not just the exit code"]
-    UNZ["Unzip .mxl<br/>handles multiple movements and pages"]
-    XSD1["2. MusicXML 4.0 XSD (xmllint, local)"]
-    DUR["3. Duration per measure<br/>suspect measures go to the report"]
-    DIV["Warning: given instrument<br/>differs from the clef/range read"]
-    FIX["4. Instrument fix-up (option B)<br/>transpose, clef, part-name, layout<br/>validates its own result"]
-    XSD2["XSD again, after the fix-up"]
-    MS["5. MuseScore 4.7.5 with -S<br/>Estilo 2026.mss (batch via -j)"]
-    VF["6. Final check on the .mscx inside the .mscz<br/>instrument, transposition, clef,<br/>page size from the style"]
-    OUT["formatted .mscz"]
-  end
+  REP["status.json: stages, timings, versions, options,<br/>counts, suspects, review signals and text_removals"]
+  FAIL["Failure: record stage and skip later stages"]
+  BATCH["Batch: run every manifest item, continue after failures<br/>compare whatever parts the manifest lists; write batch.json"]
+  HUM["Human source review and hand_corrected<br/>acceptance: corrected / expected_measures <= 5%"]
 
-  TAB["instruments.json<br/>table of the 6 instruments"]
-  REP["status.json per item<br/>stages, suspect measures,<br/>timings, tool versions"]
-  HUM["Human review: the author plays it and checks<br/>hand_corrected: list of measures<br/>goal: up to 5% (denominator = expected_measures)"]
-  LOTE["Batch: check across the 5 parts<br/>same number of measures"]
-
-  MJ --> AUD --> UNZ --> XSD1
-  XSD1 -- FAIL --> HUM
-  XSD1 -- PASS --> DUR --> FIX
-  AUD -.-> DIV
-  DIV -.-> REP
+  MJ --> AUD --> UNZ --> XSD1 --> DUR --> FIX --> XSD2 --> MS --> VF --> OUT
   TAB --> FIX
-  FIX --> XSD2 --> MS --> VF --> OUT
-  DUR -.-> REP
-  VF -.-> REP
+  PIPE -. "stage results" .-> REP
+  PIPE -. "stage error" .-> FAIL
+  FAIL --> REP
   OUT --> HUM
-  HUM -- "fixes and re-enters" --> XSD1
-  HUM --> REP
-  OUT --> LOTE
-
-  subgraph BANC["Measurement bench (research only, public-domain scores)"]
-    GAB["MIDI ground truth"]
-    PR["Precision and recall<br/>onset + pitch, time per page"]
-  end
-  UNZ -.-> PR
-  GAB -.-> PR
+  HUM -. "record corrections" .-> REP
+  MJ --> BATCH
+  REP --> BATCH
 ```
 
 ## Stages
 
-1. **Audiveris.** Runs `-batch -export` on the PDF. Checks the number of `.mxl` files produced, not just the exit code. Unzips and handles multiple movements.
-2. **XSD.** Validates the MusicXML against the local 4.0 XSD (xmllint). On failure, it goes to human review.
-3. **Duration and review checks.** Lists measures that do not add up in `status.json`. Independently checks measure counts, part counts and structural IDs, and navigation-like lyrics. Signals set `review_required` without changing stage success. See README for codes, scope and limitations.
-4. **Instrument fix-up.** Applies `instruments.json` to the given instrument: `<transpose>`, clef, name, sound; removes the OMR page layout. Adds a rehearsal mark on suspect measures and explicit review text for count and navigation warnings. An unexpected part count still stops fixup before conversion. Runs the XSD again.
-5. **MuseScore.** Converts to `.mscz` with `-S "Estilo 2026.mss"`.
-6. **Final check on the `.mscx`.** Opens the `.mscz`, reads the `.mscx` and checks instrument, transposition, clef and the style's page size.
+1. **Audiveris.** Runs `-batch -export` with the item's `audiveris_options` as
+   separate `-option name=value` arguments. Checks the exported `.mxl` files,
+   extracts each archive's declared MusicXML root, and requires exactly one
+   movement per PDF. Multiple score parts in that movement are supported;
+   multiple movements are rejected. An exit code alone does not decide success.
+2. **XSD.** Validates the raw MusicXML against the local MusicXML 4.0 XSD using
+   `xmllint`. A failed stage stops the item and skips subsequent stages.
+3. **Duration and review checks.** Checks per-measure duration, allowing pickups
+   and supported implicit/split bars. A `<multiple-rest>` start is suspect even
+   when its duration adds up; missing rest content is not reconstructed. Records
+   each part's measure count against `expected_measures`. Independently records
+   `measure_count_mismatch`, `part_count_mismatch`, `part_identity` and
+   `navigation_lyric` review signals from the raw export. Unsafe part IDs fail
+   this stage after the signal is saved, before fixup can transform an ambiguous
+   part. A count mismatch or navigation warning alone does not fail conversion.
+4. **Fixup and XSD again.** Requires one part or exactly the count in the item's
+   `parts` list, with one staff per part. Applies instrument metadata, clef,
+   transposition, sound and configured display names without changing pitches.
+   Removes OMR page layout, rejoins the supported unambiguous split-volta pattern,
+   and flags rewrites or ambiguous endings for review. By default it strips
+   recognized text, preserving navigation directions and musical notation;
+   `keep_text: true` disables text removal for the item. Cleanup runs once across
+   all parts before adding `?` rehearsal marks and `Review: ...` annotations.
+   Validates the resulting MusicXML against the XSD again.
+5. **MuseScore.** Converts the fixed MusicXML with `-S` and `-o` into a staged
+   `.mscz` using the manifest's style, normally Estilo 2026. Validates the output
+   archive instead of relying on the process exit code.
+6. **Final check.** Opens the `.mscx` inside the `.mscz` and checks every part's
+   name, instrument, transposition and clef, plus the page size from the style.
+   Publishes the staged file only after these checks pass. A rejected archive is
+   retained for inspection; an earlier successful output is not replaced by it.
 
-After that: human review (the author plays and corrects), re-entry through the XSD, and, in batch mode, a check that all parts have the same number of measures.
+## Status, batch and human review
 
-## Decisions already made
+Each item writes `output/<pdf stem>/status.json` atomically after stage updates.
+It records stage outcomes, timings, tool versions, effective Audiveris options,
+`measures_read`, derived `measure_count` (`read`, `expected`, `missing`), suspects
+and human corrections. When configured parts have different counts,
+`measures_read` and `measure_count` are `null`; per-part counts remain in the
+stage detail, and batch reports the item as `not_counted`.
 
-- The instrument is given at submission time, one of the 6 ids in `instruments.json`; the pipeline does not guess it from the PDF. Provided by the author (2026-11-03).
-- Acceptance criterion: up to 5% of the measures corrected by hand per part; denominator = `expected_measures`. Provided (2026-11-03).
-- A measure whose duration does not add up becomes a rehearsal mark in the `.mscz` and the flow continues; the list goes in `status.json`. Provided (2026-11-04). Whether the mark survives `-S` is a guess, untested.
-- `-S` with validated MusicXML on MuseScore 4.7.5 on 2026-11-04: the style in the `.mscz` is identical to Estilo 2026 (diff 0, A5 landscape). Measured, 1 file with 2 parts.
-- The final check on the `.mscx` is mandatory because the `mscore` exit code is not reliable (it exited 134 with the file generated). Measured (2026-11-04).
-- Runs on the author's Mac; PDFs never leave it. Provided (2026-11-03).
+[PR #27](https://github.com/faelplg/omr-ingestor/pull/27) introduced status schema 4:
+`review_signals` carry `code`, `detail`, `part_id` and `measure`, and
+`review_required` is true for review signals or duration/volta suspects. Part
+identity checks cover unique IDs and their declarations, not musical continuity
+or swapped voices. Navigation-like lyrics are review hints, including false
+positives for ordinary words. Count warnings are anchored at the part's first
+measure and cannot locate missing content. See the [README review signals](../README.md#review-signals)
+for the precise behavior and score annotations.
+
+[PR #29](https://github.com/faelplg/omr-ingestor/pull/29) advances current status to
+schema 5 with `text_removals`: element counts for credits, headers, lyrics, words,
+rehearsals and text-like technical marks. Counts are zero with `keep_text: true`,
+and unknown (`null`) before fixup completes or when reading schemas 1-4. Schemas
+1-3 load with no review signals; only a rerun performs the new checks.
+
+Batch runs all items in manifest order and continues after item failures,
+including per-item setup and I/O failures. It compares whatever parts the
+manifest lists, using available shared counts and each item's expected count.
+`batch.json` schema 3 contains item outcomes, review state and cross-part
+agreement. Count disagreements are warnings; batch exits successfully only when
+all items pass their stages.
+
+Human review compares the output with the PDF and records `hand_corrected`.
+Acceptance requires **at most 5% of measures corrected by hand per part**, with
+`expected_measures` as the denominator. Before review, acceptance is unknown.
+This human metric is separate from stage success and does not clear review
+warnings. Rerunning recomputes from the PDF and preserves the recorded human
+correction list; there is no automatic re-entry command for an edited MusicXML.
+
+## Decisions and measured evidence
+
+- Instrument selection is explicit, never inferred from the PDF. The six IDs are
+  `bb-trumpet`, `trombone`, `flute`, `alto-saxophone`, `tenor-saxophone` and `tuba`.
+  The catalog size does not constrain how many parts a manifest lists.
+- The pipeline is local to the author's Mac. Copyrighted PDFs and derived score
+  material stay off the repository and are not sent to another machine.
+- Real MuseScore 4.7.5 testing on 2026-11-04 found Estilo 2026 applied with zero
+  style diff on one two-part file (A5 landscape). A generated file survived exit
+  code 134, motivating output validation and the mandatory final MSCX check.
+- Volta repair is deliberately narrow: an ending split into consecutive spans
+  before a backward repeat is rejoined only when the supported pattern is
+  unambiguous. Other suspicious endings remain for human review. Automated tests
+  cover the rewrite and marks; they do not establish source fidelity for every
+  ending or prove every mark survives every real-tool conversion.
+- Multi-measure rests and missing/extra measure counts require review even if
+  surviving bars total correctly. Neither signal reconstructs lost content.
+- Per-item Audiveris constants preserve installed defaults when omitted and are
+  recorded in logs and status. On the framed Carnaval test set, reducing
+  `StaffProjector.staffAbscissaMargin` to `1.0` separated false system connections;
+  four parts reached 33/33 measures, with one remaining trombone duration suspect.
+  The tenor also needed 600 dpi; higher resolution worsened another part's
+  rhythm recognition. These are layout-specific settings, not global defaults.
+- Successful stage checks establish structural properties, instrument metadata
+  and style checks. Musical accuracy still depends on source-backed human review
+  and the <=5% hand-correction criterion.
