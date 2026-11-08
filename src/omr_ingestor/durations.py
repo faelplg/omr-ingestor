@@ -16,7 +16,7 @@ from fractions import Fraction
 from pathlib import Path
 
 from omr_ingestor.musicxml import MusicXMLError, read_musicxml
-from omr_ingestor.navigation import _NAVIGATION, _NAVIGATION_SOUND_ATTRIBUTES
+from omr_ingestor.navigation import NAVIGATION_PATTERN, NAVIGATION_SOUND_ATTRIBUTES
 
 
 @dataclass(frozen=True, slots=True)
@@ -315,12 +315,13 @@ def check_review_signals(
                 direction.find(".//coda") is not None
                 or direction.find(".//segno") is not None
                 or any(
-                    _NAVIGATION.search(words.text or "") for words in direction.findall(".//words")
+                    NAVIGATION_PATTERN.search(words.text or "")
+                    for words in direction.findall(".//words")
                 )
                 for direction in part.findall("measure/direction")
             )
             or any(
-                _NAVIGATION_SOUND_ATTRIBUTES.intersection(sound.attrib)
+                NAVIGATION_SOUND_ATTRIBUTES.intersection(sound.attrib)
                 for sound in part.findall("measure/sound") + part.findall("measure/direction/sound")
             )
             or any(
@@ -332,7 +333,7 @@ def check_review_signals(
         for measure in measures:
             for lyric in measure.findall("note/lyric"):
                 text = " ".join(el.text or "" for el in lyric if el.tag in ("text", "elision"))
-                if _NAVIGATION.search(text):
+                if NAVIGATION_PATTERN.search(text):
                     detail = f"navigation-like lyric {text!r}; verify against the source"
                     if not has_navigation:
                         detail += "; no navigation direction found in this part"
