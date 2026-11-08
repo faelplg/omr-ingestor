@@ -143,7 +143,7 @@ Runs every item of the manifest in order, exactly as `run` does, and writes each
 
 ## Development
 
-Verify changes with `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest -q`.
+Verify changes with `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest -q`; CI runs all three checks.
 
 ## PDFs never leave the Mac
 
