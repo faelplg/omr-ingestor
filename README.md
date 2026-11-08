@@ -12,6 +12,8 @@ Every stage of `docs/architecture.md` is implemented, per item (`run`) and over 
 - Input: a `music.json` manifest (see `docs/music.schema.json` and `examples/music.example.json`) that lists the PDFs, the instrument of each one (provided at submission time, never guessed) and the expected number of measures.
 - Output: one `.mscz` per PDF plus a `status.json` per item, in `output/` (kept out of git).
 - Stages and decisions: `docs/architecture.md`.
+- [Known accuracy limits](docs/accuracy.md): what review signals catch, tested
+  Audiveris mitigations, and the <=5% hand-correction acceptance criterion.
 
 ## Usage
 
