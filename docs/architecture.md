@@ -1,9 +1,11 @@
 # omr-ingestor architecture
 
 All six stages are implemented on main for a single manifest item (`run`) and for
-all items (`batch`). Automated tests exercise the pipeline with fake Audiveris and
-MuseScore executables. Real-tool observations below are bounded measurements, not
-a claim that every converted score is musically correct.
+all items (`batch`). Stage 4 groups fixup and its XSD check, which status records
+as separate stages, giving seven stage names. Automated tests exercise the
+pipeline with fake Audiveris and MuseScore executables. Real-tool observations
+below are bounded measurements, not a claim that every converted score is
+musically correct.
 
 ```mermaid
 flowchart TB
@@ -25,7 +27,7 @@ flowchart TB
   REP["status.json: stages, timings, versions, options,<br/>counts, suspects, review signals and text_removals"]
   FAIL["Failure: record stage and skip later stages"]
   BATCH["Batch: run every manifest item, continue after failures<br/>compare whatever parts the manifest lists; write batch.json"]
-  HUM["Human source review and hand_corrected<br/>acceptance: corrected / expected_measures <= 5%"]
+  HUM["Human source review and hand_corrected<br/>per-item acceptance: corrected / expected_measures <= 5%"]
 
   MJ --> AUD --> UNZ --> XSD1 --> DUR --> FIX --> XSD2 --> MS --> VF --> OUT
   TAB --> FIX
@@ -35,6 +37,7 @@ flowchart TB
   OUT --> HUM
   HUM -. "record corrections" .-> REP
   MJ --> BATCH
+  BATCH -->|"run_item per item"| PIPE
   REP --> BATCH
 ```
 
@@ -58,9 +61,11 @@ flowchart TB
 4. **Fixup and XSD again.** Requires one part or exactly the count in the item's
    `parts` list, with one staff per part. Applies instrument metadata, clef,
    transposition, sound and configured display names without changing pitches.
-   Removes OMR page layout, rejoins the supported unambiguous split-volta pattern,
-   and flags rewrites or ambiguous endings for review. By default it strips
-   recognized text, preserving navigation directions and musical notation;
+   Removes OMR page layout and rejoins the supported unambiguous split-volta
+   pattern. A rewrite gets a `?` mark and a fixup stage detail, but does not by
+   itself set `review_required`. Ambiguous endings enter `suspect_measures` and
+   set `review_required`. By default it strips recognized text, preserving
+   navigation directions and musical notation;
    `keep_text: true` disables text removal for the item. Cleanup runs once across
    all parts before adding `?` rehearsal marks and `Review: ...` annotations.
    Validates the resulting MusicXML against the XSD again.
@@ -76,10 +81,9 @@ flowchart TB
 
 Each item writes `output/<pdf stem>/status.json` atomically after stage updates.
 It records stage outcomes, timings, tool versions, effective Audiveris options,
-`measures_read`, derived `measure_count` (`read`, `expected`, `missing`), suspects
-and human corrections. When configured parts have different counts,
-`measures_read` and `measure_count` are `null`; per-part counts remain in the
-stage detail, and batch reports the item as `not_counted`.
+`measure_count` (`read`, `expected`, `missing`), suspects and human corrections.
+When configured parts have different counts, `measure_count` is `null`; per-part
+counts remain in the stage detail, and batch reports the item as `not_counted`.
 
 [PR #27](https://github.com/faelplg/omr-ingestor/pull/27) introduced status schema 4:
 `review_signals` carry `code`, `detail`, `part_id` and `measure`, and
@@ -104,11 +108,14 @@ agreement. Count disagreements are warnings; batch exits successfully only when
 all items pass their stages.
 
 Human review compares the output with the PDF and records `hand_corrected`.
-Acceptance requires **at most 5% of measures corrected by hand per part**, with
-`expected_measures` as the denominator. Before review, acceptance is unknown.
-This human metric is separate from stage success and does not clear review
-warnings. Rerunning recomputes from the PDF and preserves the recorded human
-correction list; there is no automatic re-entry command for an edited MusicXML.
+The acceptance ratio is computed **per item** as the number of entries in its
+shared `hand_corrected` list divided by `expected_measures`, with a **<=5%**
+limit. It is a per-part ratio only for single-part items. Multipart items share
+one list and cannot record the same measure number separately for each part.
+Before review, acceptance is unknown. This human metric is separate from stage
+success and does not clear review warnings. See [Known accuracy limits](accuracy.md)
+for detection gaps and input-specific recognition settings. Rerunning recomputes
+from the PDF and preserves the recorded human correction list; there is no automatic re-entry command for an edited MusicXML.
 
 ## Decisions and measured evidence
 
@@ -131,8 +138,8 @@ correction list; there is no automatic re-entry command for an edited MusicXML.
   recorded in logs and status. On the framed Carnaval test set, reducing
   `StaffProjector.staffAbscissaMargin` to `1.0` separated false system connections;
   four parts reached 33/33 measures, with one remaining trombone duration suspect.
-  The tenor also needed 600 dpi; higher resolution worsened another part's
-  rhythm recognition. These are layout-specific settings, not global defaults.
+  The tenor also needed 600 dpi. These are layout-specific settings, not global
+  defaults.
 - Successful stage checks establish structural properties, instrument metadata
   and style checks. Musical accuracy still depends on source-backed human review
-  and the <=5% hand-correction criterion.
+  and the <=5% per-item hand-correction ratio described above.
