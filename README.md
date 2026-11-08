@@ -97,8 +97,11 @@ voltas and navigation (`sound`, segno and coda) retain their musical content.
 The whole direction, including text and positioning, is kept when its `sound`
 has `dacapo`, `dalsegno`, `fine`, `tocoda`, `coda` or `segno`, or when any of its
 words matches the shared navigation pattern used by review signals (for example
-"D.S. al Coda", "D.C.", "Fine" or "To Coda"), even without a `sound`. Other words,
-such as tempo text, "rit." and "solo", are removed.
+"D.S. al Coda", "D.C.", "Fine", Portuguese "fim" or "To Coda"), even without a
+`sound`. When stripping is ambiguous, cleanup keeps text: a direction matching
+the navigation pattern is kept whole, including any unrelated words in it.
+Other words, such as tempo text, "rit." and "solo", are removed when their
+direction does not qualify for preservation.
 Instrument and volta fixes still apply as described above.
 
 Set `"keep_text": true` on an individual manifest item to keep its original text.
