@@ -272,9 +272,7 @@ def strip_text(root: ET.Element, *, keep_text: bool = False) -> dict[str, int]:
 
 
 def _has_mark(measure: ET.Element, text: str) -> bool:
-    return any(
-        r.text == text for r in measure.iterfind("direction/direction-type/rehearsal")
-    )
+    return any(r.text == text for r in measure.iterfind("direction/direction-type/rehearsal"))
 
 
 def _add_marks(part: ET.Element, numbers: Iterable[str], text: str) -> None:
