@@ -135,6 +135,10 @@ Runs every item of the manifest in order, exactly as `run` does, and writes each
 - stdout: one line per item as it finishes, then a summary table. Disagreements are printed as warnings on stderr.
 - Exit code: 0 only if every item passed. A measure-count disagreement is a warning, not a failure: the author fixes it by hand.
 
+## Development
+
+Verify changes with `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest -q`.
+
 ## PDFs never leave the Mac
 
 The PDFs are the author's own (purchased or from a publisher). They are not committed (`.gitignore` ignores `*.pdf`) and are never sent to a server or to another machine. Tests outside the Mac use only public-domain or synthetic files.
