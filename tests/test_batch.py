@@ -197,9 +197,7 @@ def test_item_status_write_error_does_not_abort_batch(batch: Batch, monkeypatch,
 
     items = batch.items()
     assert items["song-trumpet"]["status"] == (FAILED if started else "setup_error")
-    assert items["song-trumpet"]["status_file"] == (
-        "song-trumpet/status.json" if started else None
-    )
+    assert items["song-trumpet"]["status_file"] == ("song-trumpet/status.json" if started else None)
     assert items["song-trumpet"]["audiveris_options"] == ({} if started else None)
     status_file = batch.output / "song-trumpet/status.json"
     assert status_file.is_file() is started

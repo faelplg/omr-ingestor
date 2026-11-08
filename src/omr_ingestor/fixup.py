@@ -21,7 +21,7 @@ from omr_ingestor.musicxml import (
     read_musicxml,
     write_musicxml,
 )
-from omr_ingestor.navigation import _NAVIGATION, _NAVIGATION_SOUND_ATTRIBUTES
+from omr_ingestor.navigation import NAVIGATION_PATTERN, NAVIGATION_SOUND_ATTRIBUTES
 
 
 class FixupError(MusicXMLError):
@@ -255,10 +255,11 @@ def strip_text(root: ET.Element, *, keep_text: bool = False) -> dict[str, int]:
     for measure in root.iterfind("part/measure"):
         for direction in measure.findall("direction"):
             if any(
-                _NAVIGATION_SOUND_ATTRIBUTES.intersection(sound.attrib)
+                NAVIGATION_SOUND_ATTRIBUTES.intersection(sound.attrib)
                 for sound in direction.findall("sound")
             ) or any(
-                _NAVIGATION.search(words.text or "") for words in direction.findall(".//words")
+                NAVIGATION_PATTERN.search(words.text or "")
+                for words in direction.findall(".//words")
             ):
                 continue
             for kind in direction.findall("direction-type"):
@@ -272,9 +273,7 @@ def strip_text(root: ET.Element, *, keep_text: bool = False) -> dict[str, int]:
 
 
 def _has_mark(measure: ET.Element, text: str) -> bool:
-    return any(
-        r.text == text for r in measure.iterfind("direction/direction-type/rehearsal")
-    )
+    return any(r.text == text for r in measure.iterfind("direction/direction-type/rehearsal"))
 
 
 def _add_marks(part: ET.Element, numbers: Iterable[str], text: str) -> None:
