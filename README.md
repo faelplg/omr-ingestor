@@ -12,6 +12,8 @@ Every stage of `docs/architecture.md` is implemented, per item (`run`) and over 
 - Input: a `music.json` manifest (see `docs/music.schema.json` and `examples/music.example.json`) that lists the PDFs, the instrument of each one (provided at submission time, never guessed) and the expected number of measures.
 - Output: one `.mscz` per PDF plus a `status.json` per item, in `output/` (kept out of git).
 - Stages and decisions: `docs/architecture.md`.
+- [Known accuracy limits](docs/accuracy.md): what review signals catch, tested
+  Audiveris mitigations, and the <=5% hand-correction acceptance criterion.
 
 ## Usage
 
@@ -34,10 +36,11 @@ single-part behavior and the instrument's default name.
 
 `expected_measures` applies to each part. Duration details and suspects identify
 part IDs and report missing or extra measures for each part without failing the run.
-When all parts have the same count, that count is recorded as `measures_read` in
-status and `measures.read` in the batch summary, and included in the batch cross-part
-comparison. If counts differ, these fields are `null` and batch lists the item as
-`not_counted`; consult the durations detail for each count. The final MuseScore
+When all parts have the same count, that count is recorded as `measure_count.read`
+in `status.json` and `measures.read` in the batch summary, and included in the batch
+cross-part comparison. If counts differ, status's `measure_count` and batch's
+`measures.read` are `null`, and batch lists the item as `not_counted`; consult the
+durations detail for each count. The final MuseScore
 check verifies every configured part's name, instrument, transposition and clef.
 One `.mscz` contains all parts.
 
@@ -95,8 +98,11 @@ voltas and navigation (`sound`, segno and coda) retain their musical content.
 The whole direction, including text and positioning, is kept when its `sound`
 has `dacapo`, `dalsegno`, `fine`, `tocoda`, `coda` or `segno`, or when any of its
 words matches the shared navigation pattern used by review signals (for example
-"D.S. al Coda", "D.C.", "Fine" or "To Coda"), even without a `sound`. Other words,
-such as tempo text, "rit." and "solo", are removed.
+"D.S. al Coda", "D.C.", "Fine", Portuguese "fim" or "To Coda"), even without a
+`sound`. When stripping is ambiguous, cleanup keeps text: a direction matching
+the navigation pattern is kept whole, including any unrelated words in it.
+Other words, such as tempo text, "rit." and "solo", are removed when their
+direction does not qualify for preservation.
 Instrument and volta fixes still apply as described above.
 
 Set `"keep_text": true` on an individual manifest item to keep its original text.
@@ -153,3 +159,33 @@ The pipeline calls separately installed programs from the command line. None of 
 | MuseScore Studio | 4.7.5 | GPL v3 | MusicXML → `.mscz` with style (`-S`, `-o`) |
 
 If this ever becomes a service for other people, review Audiveris's AGPL first.
+
+## Documentation checksums
+
+`MANIFEST.sha256` stays docs-only in scope, covering only the documentation and
+supporting files explicitly listed below. It excludes `src/`, `tests/`,
+`pyproject.toml` and generated run outputs; it is not a complete release-integrity
+manifest. New files in `docs/` are not included automatically: add them to the
+regeneration command's file list when extending coverage.
+
+From the repository root, regenerate after changing a listed file:
+
+```sh
+shasum -a 256 \
+  ./.gitignore \
+  ./README.md \
+  ./docs/accuracy.md \
+  ./docs/architecture.md \
+  ./docs/music.schema.json \
+  ./examples/music.example.json \
+  ./instruments.json > MANIFEST.sha256
+```
+
+Then verify, also from the repository root:
+
+```sh
+shasum -a 256 -c MANIFEST.sha256
+```
+
+CI does not yet run this check; [#31](https://github.com/faelplg/omr-ingestor/issues/31)
+tracks adding it.
