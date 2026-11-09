@@ -143,7 +143,7 @@ Runs every item of the manifest in order, exactly as `run` does, and writes each
 
 ## Development
 
-Verify changes with `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest -q`; CI runs all three checks.
+Verify changes with `uv run ruff check .`, `uv run ruff format --check .`, `uv run pytest -q` and `shasum -a 256 -c MANIFEST.sha256`; CI runs all four checks.
 
 ## PDFs never leave the Mac
 
@@ -187,5 +187,4 @@ Then verify, also from the repository root:
 shasum -a 256 -c MANIFEST.sha256
 ```
 
-CI does not yet run this check; [#31](https://github.com/faelplg/omr-ingestor/issues/31)
-tracks adding it.
+CI runs this checksum check for pull requests and pushes to `main`.
