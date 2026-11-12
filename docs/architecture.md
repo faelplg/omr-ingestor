@@ -57,8 +57,8 @@ flowchart TB
    remain accepted. A `<multiple-rest>` start is suspect even
    when its duration adds up; missing rest content is not reconstructed. Records
    each part's measure count against `expected_measures`. Independently records
-   `measure_count_mismatch`, `part_count_mismatch`, `part_identity` and
-   `navigation_lyric` review signals from the raw export. Unsafe part IDs fail
+   `measure_count_mismatch`, `part_count_mismatch`, `part_identity`,
+   `part_identity_changed` and `navigation_lyric` review signals from the raw export. Unsafe part IDs fail
    this stage after the signal is saved, before fixup can transform an ambiguous
    part. `measure_count_mismatch` and `navigation_lyric` warnings alone do not
    fail conversion. A `part_count_mismatch` is recorded here, but an incompatible
@@ -106,8 +106,9 @@ schema 6) and adds `part_identities`. The latter maps each ID to its raw
 values). These are read from the score-part declarations before instrument fixup,
 so manifest names and configured instruments cannot hide a change. Missing names
 are stored as empty strings; absent score instruments yield an empty list.
-On a first run, IDs and identities are unknown until the durations stage succeeds. A rerun retains the previous
-IDs until that stage validates the new score; schemas 1-5 load with unknown IDs.
+On a first run, IDs and identities are unknown until the durations stage succeeds.
+A rerun retains the previous IDs until that stage validates the new score;
+schemas 1-5 load with unknown IDs.
 The `text_removals` field,
 introduced by [PR #29](https://github.com/faelplg/omr-ingestor/pull/29) in schema 5,
 records element counts for credits, headers, lyrics, words, rehearsals and
@@ -151,8 +152,8 @@ Rerun to populate `part_ids`, then replace the list with a mapping after reviewi
 each part to obtain per-part acceptance. For reviews with `part_identities`, a
 rerun compares each reviewed ID, raw part name and instrument-name list. A dropped
 or renumbered part, changed name or changed instrument stops the durations stage
-before fixup and conversion. The affected part gets a `part_identity` review
-signal explaining the recorded and current metadata and the need for source
+before fixup and conversion. The affected part gets a `part_identity_changed`
+review signal explaining the recorded and current metadata and the need for source
 review again. Its acceptance becomes `null`, including for a previously empty
 correction list. Other reviewed parts retain their acceptance. The previous IDs,
 identities and corrections are preserved for inspection; repeating the rerun
@@ -165,7 +166,15 @@ schema 7; metadata is never retroactively attached to an old review. Such record
 cannot detect reused IDs after voice swaps or renumbering. To establish a fresh
 identity-backed review, archive the previous status file, rerun to capture raw
 identities, then record the per-part corrections after comparing with the source.
-Use the same fresh-review workflow after an intentional identity change.
+For an intentional name or instrument change with the same IDs, remove only the
+affected entry from `hand_corrected` and clear its derived acceptance by setting
+`acceptance.<part ID>` to `null`. Keep the other parts' review records and the
+recorded identities. Rerun to capture the changed part's current identity, then
+review it against the source and record its corrections and acceptance again.
+The removed entry's `part_identity_changed` signal is not carried into that run.
+If previously recorded IDs are missing, use the fresh-review workflow above;
+the missing-ID safeguard still applies. Restoring the original score instead
+also clears the change signal on a successful rerun and restores acceptance.
 
 All reruns also stop if any previously recorded ID disappears, including
 unreviewed parts omitted from the mapping. Additions are allowed. For legacy

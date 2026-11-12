@@ -217,7 +217,7 @@ class ItemStatus:
                 part_id: self._acceptance(self.hand_corrected[part_id])
                 if part_id in self.hand_corrected
                 and not any(
-                    signal.code == "part_identity" and signal.part_id == part_id
+                    signal.code == "part_identity_changed" and signal.part_id == part_id
                     for signal in self.review_signals
                 )
                 else None

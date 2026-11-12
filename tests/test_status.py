@@ -384,7 +384,7 @@ def test_part_identities_round_trip_and_invalidate_only_affected_acceptance(tmp_
             "P2": PartIdentity("", ()),
         },
         hand_corrected={"P1": (), "P2": ("7",)},
-        review_signals=(ReviewSignal("part_identity", "identity changed", part_id="P1"),),
+        review_signals=(ReviewSignal("part_identity_changed", "identity changed", part_id="P1"),),
     )
     path = tmp_path / "status.json"
     write_status(item, path)
@@ -412,3 +412,14 @@ def test_rejects_malformed_part_identities(identities):
     data["part_identities"] = identities
     with pytest.raises(StatusError, match="part_identities"):
         ItemStatus.from_dict(data)
+
+
+@pytest.mark.parametrize("part_id", ["", "P1"])
+def test_structural_identity_signal_does_not_invalidate_part_acceptance(part_id):
+    item = sample(
+        part_ids=("P1", "P2"),
+        hand_corrected={"P1": ()},
+        review_signals=(ReviewSignal("part_identity", "duplicate IDs", part_id=part_id),),
+    )
+    assert item.acceptance["P1"].accepted
+    assert item.review_required

@@ -284,6 +284,14 @@ def _xsd(ctx: _Context) -> str:
     return "valid"
 
 
+def _describe_part_identity(identity: PartIdentity | None) -> str:
+    if identity is None:
+        return "missing from the current score"
+    name = identity.part_name or "(unnamed)"
+    instruments = ", ".join(identity.instruments) or "(none recorded)"
+    return f'name "{name}", instruments: {instruments}'
+
+
 def _durations(ctx: _Context) -> str:
     root = read_musicxml(ctx.raw_musicxml)
     ids = tuple(part_ids(root))
@@ -300,11 +308,14 @@ def _durations(ctx: _Context) -> str:
     if isinstance(ctx.status.hand_corrected, dict) and ctx.status.part_identities is not None:
         mismatches = tuple(
             ReviewSignal(
-                code="part_identity",
+                code="part_identity_changed",
                 part_id=pid,
                 detail=(
-                    f"part {pid} identity changed: recorded {ctx.status.part_identities[pid]!r}, "
-                    f"current {identities.get(pid)!r}; hand corrections withheld, "
+                    f"part {pid} identity changed: recorded "
+                    f"{_describe_part_identity(ctx.status.part_identities[pid])}; "
+                    "current "
+                    f"{_describe_part_identity(identities.get(pid) if pid in ids else None)}; "
+                    "hand corrections withheld, "
                     "review this part against the source again"
                 ),
             )
@@ -544,9 +555,11 @@ def _prepare(manifest_path: Path, selector: str, output_dir: Path) -> _Context:
         part_identities=previous.part_identities if previous else None,
         # Keep invalidated reviews unknown until the new score passes identity checks.
         review_signals=tuple(
-            signal for signal in previous.review_signals if signal.code == "part_identity"
+            signal
+            for signal in previous.review_signals
+            if signal.code == "part_identity_changed" and signal.part_id in previous.hand_corrected
         )
-        if previous and previous.part_identities is not None
+        if previous and isinstance(previous.hand_corrected, dict)
         else (),
         audiveris_options=dict(item.get("audiveris_options", {})),
     )
