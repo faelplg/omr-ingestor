@@ -2,11 +2,28 @@
 
 Passing the pipeline does not establish musical fidelity. Acceptance still
 requires source-backed human review. The **<=5%** hand-correction ratio is
-computed **per item**: entries in its shared `hand_corrected` list divided by
-`expected_measures`. It is per part only for single-part items; multipart items
-cannot record the same measure number separately for each part. A zero-suspect
-report is not acceptance, and recording `hand_corrected` does not clear review
-warnings.
+computed **per part**: that part's corrected measure count divided by the item's
+`expected_measures`. Single-part items keep the `hand_corrected` list format.
+Multipart items use a mapping keyed by MusicXML part ID, for example
+`{"P1": ["7"], "P2": ["7", "12a"]}`. A measure may be recorded in both parts,
+but duplicates within a part are rejected. Status schema 6 records `part_ids`
+and per-part `acceptance`; batch schema 4 reports the same ratios in `batch.json`
+and the terminal summary. Missing mapping entries are unreviewed (`null`
+acceptance); empty lists mean reviewed with no corrections. Every part needs
+source-backed review and must independently meet the <=5% limit.
+
+Older status files still load. A multipart item's old shared list keeps its
+original item-wide ratio, including after rerunning, but `accepted` is `null`.
+A <=5% shared ratio does not establish per-part acceptance. The batch JSON marks
+its `acceptance_scope` as `legacy_item_wide`, and the terminal summary identifies
+it as legacy item-wide with per-part acceptance unknown. The reviewer must
+explicitly replace it with per-part lists after source review. Flat lists with
+unknown part IDs also have unknown acceptance until a rerun establishes their
+part identity; a confirmed single part retains boolean acceptance and has no
+shared label in the terminal summary. See [Architecture](architecture.md) for the
+status fields and migration workflow.
+A zero-suspect report is not acceptance, and recording `hand_corrected` does not
+clear review warnings.
 
 The initial six-instrument review ([#15](https://github.com/faelplg/omr-ingestor/issues/15))
 found useful duration suspects, missed multi-measure rests, tied whole notes

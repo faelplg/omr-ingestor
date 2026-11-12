@@ -16,7 +16,10 @@ from omr_ingestor.musescore import MUSESCORE_ENV_VAR
 from omr_ingestor.musicxml import read_musicxml
 from omr_ingestor.pipeline import (
     PipelineSetupError,
+    StageError,
     _annotate_review_signals,
+    _durations,
+    _prepare,
     run_item,
     select_item,
 )
@@ -685,3 +688,140 @@ def test_text_policy_runs_once_for_multipart_and_preserves_review(setup, monkeyp
     words = [el.text for el in fixed.iter("words")]
     assert all("Review: " + s.detail in words for s in status.review_signals)
     assert fixed.findtext(".//rehearsal") == ("A" if keep_text else "?")
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_multipart_hand_corrections_survive_rerun_and_reach_batch(
+    setup, monkeypatch, capsys, legacy
+):
+    configure_parts(setup, ["Trumpet 1", "Trumpet 2"])
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [multipart_xml()])))
+    monkeypatch.setenv(MUSESCORE_ENV_VAR, str(fake_musescore(setup.bin, two_trumpet_mscx())))
+    manifest = json.loads(setup.manifest.read_text())
+    manifest["items"][0]["expected_measures"] = 60
+    setup.manifest.write_text(json.dumps(manifest))
+    assert setup.run() == 0
+    status = setup.status()
+    assert status.part_ids == ("P1", "P2")
+    corrections = ("1",) if legacy else {"P1": ("1",), "P2": ("1", "2")}
+    reviewed = replace(status, hand_corrected=corrections)
+    data = reviewed.to_dict()
+    if legacy:
+        data["schema_version"] = 5
+        del data["part_ids"]
+        data["acceptance"]["accepted"] = True
+    (setup.item_dir / "status.json").write_text(json.dumps(data))
+    capsys.readouterr()
+
+    assert main(["batch", "-o", str(setup.output), str(setup.manifest)]) == 0
+    status = setup.status()
+    assert status.hand_corrected == corrections
+    assert status.part_ids == ("P1", "P2")
+    summary = json.loads((setup.output / "batch.json").read_text())
+    acceptance = summary["items"][0]["acceptance"]
+    assert acceptance == status.to_dict()["acceptance"] == reviewed.to_dict()["acceptance"]
+    out = capsys.readouterr().out
+    if legacy:
+        assert summary["items"][0]["acceptance_scope"] == "legacy_item_wide"
+        assert acceptance["ratio"] == 0.016667
+        assert acceptance["accepted"] is None
+        assert (
+            f"hand corrections: {STEM} legacy item-wide: 1/60 (1.67%), per-part acceptance unknown"
+        ) in out
+    else:
+        assert summary["items"][0]["acceptance_scope"] == "per_part"
+        assert acceptance["P1"]["ratio"] == 0.016667
+        assert acceptance["P2"]["ratio"] == 0.033333
+        assert f"hand corrections: {STEM} P1: 1/60 (1.67%), accepted" in out
+        assert f"hand corrections: {STEM} P2: 2/60 (3.33%), accepted" in out
+
+
+@pytest.mark.parametrize("replacement", ['"P3"', '"P1"', '""'])
+def test_rerun_preserves_corrections_when_part_ids_change(setup, monkeypatch, replacement):
+    configure_parts(setup, ["Trumpet 1", "Trumpet 2"])
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [multipart_xml()])))
+    monkeypatch.setenv(MUSESCORE_ENV_VAR, str(fake_musescore(setup.bin, two_trumpet_mscx())))
+    assert setup.run() == 0
+    reviewed = replace(setup.status(), hand_corrected={"P2": ("1",)})
+    write_status(reviewed, setup.item_dir / "status.json")
+    xml = multipart_xml().replace('"P2"', replacement)
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [xml])))
+    assert setup.run() == 1
+    status = setup.status()
+    assert status.hand_corrected == {"P2": ("1",)}
+    assert status.part_ids == ("P1", "P2")
+    assert "part IDs do not match" in status.stage("durations").detail
+    # Rejected score data must not be published alongside the previous review IDs.
+    assert status.measures_read is None
+    assert status.suspect_measures == ()
+    assert status.review_signals == ()
+
+
+@pytest.mark.parametrize("corrections", [{"P2": ("1",)}, {"P1": ("1",)}, {}])
+@pytest.mark.parametrize("replacement", ['"P3"', '"P1"', '""'])
+def test_duration_part_id_failure_leaves_context_and_status_file_unchanged(
+    setup, replacement, corrections
+):
+    configure_parts(setup, ["Trumpet 1", "Trumpet 2"])
+    ctx = _prepare(setup.manifest, "0", setup.output)
+    ctx.status = replace(
+        ctx.status, part_ids=("P1", "P2"), hand_corrected=corrections, measures_read=2
+    )
+    setup.item_dir.mkdir(parents=True)
+    write_status(ctx.status, ctx.paths.status)
+    before_status = ctx.status
+    before_bytes = ctx.paths.status.read_bytes()
+    ctx.raw_musicxml = setup.item_dir / "rerun.musicxml"
+    ctx.raw_musicxml.write_text(multipart_xml().replace('"P2"', replacement))
+
+    with pytest.raises(StageError, match="part IDs do not match"):
+        _durations(ctx)
+
+    assert ctx.status is before_status
+    assert ctx.report is None
+    assert ctx.paths.status.read_bytes() == before_bytes
+
+
+@pytest.mark.parametrize("corrections", [{}, {"P1": ("1",)}, (), None])
+def test_rerun_rejects_removal_of_unreviewed_part(setup, monkeypatch, corrections):
+    configure_parts(setup, ["Trumpet 1", "Trumpet 2"])
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [multipart_xml()])))
+    monkeypatch.setenv(MUSESCORE_ENV_VAR, str(fake_musescore(setup.bin, two_trumpet_mscx())))
+    assert setup.run() == 0
+    reviewed = replace(setup.status(), hand_corrected=corrections)
+    write_status(reviewed, setup.item_dir / "status.json")
+    xml = multipart_xml().replace('"P2"', '"P3"')
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [xml])))
+
+    assert setup.run() == 1
+
+    status = setup.status()
+    assert status.part_ids == ("P1", "P2")
+    assert status.hand_corrected == corrections
+    assert "part IDs do not match" in status.stage("durations").detail
+    assert status.measures_read is None
+    assert status.suspect_measures == ()
+    assert status.review_signals == ()
+
+
+def test_duration_allows_additional_part_and_preserves_unreviewed_identity(setup):
+    configure_parts(setup, ["Trumpet 1", "Trumpet 2", "Trumpet 3"])
+    ctx = _prepare(setup.manifest, "0", setup.output)
+    ctx.status = replace(ctx.status, part_ids=("P1", "P2"), hand_corrected={"P1": ("1",)})
+    setup.item_dir.mkdir(parents=True)
+    ctx.raw_musicxml = setup.item_dir / "rerun.musicxml"
+    ctx.raw_musicxml.write_text(
+        score(
+            {
+                pid: [measure(1, DEFAULT_ATTRS + note(4)), measure(2, note(4))]
+                for pid in ("P1", "P2", "P3")
+            }
+        )
+    )
+
+    _durations(ctx)
+
+    assert ctx.status.part_ids == ("P1", "P2", "P3")
+    assert ctx.status.hand_corrected == {"P1": ("1",)}
+    assert ctx.status.acceptance["P2"] is None
+    assert ctx.status.acceptance["P3"] is None

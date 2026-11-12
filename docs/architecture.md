@@ -27,7 +27,7 @@ flowchart TB
   REP["status.json: stages, timings, versions, options,<br/>counts, suspects, review signals and text_removals"]
   FAIL["Failure: record stage and skip later stages"]
   BATCH["Batch: run every manifest item, continue after failures<br/>compare whatever parts the manifest lists; write batch.json"]
-  HUM["Human source review and hand_corrected<br/>per-item acceptance: corrected / expected_measures <= 5%"]
+  HUM["Human source review and hand_corrected<br/>per-part acceptance: corrected / expected_measures <= 5%"]
 
   MJ --> AUD --> UNZ --> XSD1 --> DUR --> FIX --> XSD2 --> MS --> VF --> OUT
   TAB --> FIX
@@ -99,24 +99,57 @@ positives for ordinary words. Count warnings are anchored at the part's first
 measure and cannot locate missing content. See the [README review signals](../README.md#review-signals)
 for the precise behavior and score annotations.
 
-[PR #29](https://github.com/faelplg/omr-ingestor/pull/29) advances current status to
-schema 5 with `text_removals`: element counts for credits, headers, lyrics, words,
-rehearsals and text-like technical marks. Counts are zero with `keep_text: true`,
+Status schema 6 records `part_ids` (MusicXML IDs in score order). On a first run,
+they are unknown until the durations stage succeeds. A rerun retains the previous
+IDs until that stage validates the new score; schemas 1-5 load with unknown IDs.
+The `text_removals` field,
+introduced by [PR #29](https://github.com/faelplg/omr-ingestor/pull/29) in schema 5,
+records element counts for credits, headers, lyrics, words, rehearsals and
+text-like technical marks. Counts are zero with `keep_text: true`,
 and unknown (`null`) before fixup completes or when reading schemas 1-4. Schemas
 1-3 load with no review signals; only a rerun performs the new checks.
 
 Batch runs all items in manifest order and continues after item failures,
 including per-item setup and I/O failures. It compares whatever parts the
 manifest lists, using available shared counts and each item's expected count.
-`batch.json` schema 3 contains item outcomes, review state and cross-part
-agreement. Count disagreements are warnings; batch exits successfully only when
-all items pass their stages.
+`batch.json` schema 4 contains item outcomes, review state, acceptance and
+cross-part agreement. Its per-item `acceptance` matches the status file, including
+per-part ratios for correction mappings; the terminal summary also prints them.
+`acceptance_scope` identifies `per_part`, `single_part`, or `legacy_item_wide`
+acceptance (`null` before review). The terminal uses a part ID for mappings, no
+part label for a single-part list, and an explicit legacy item-wide label for
+flat lists without confirmed single-part identity.
+Count disagreements are warnings; batch exits successfully only when all items
+pass their stages.
 
 Human review compares the output with the PDF and records `hand_corrected`.
-The acceptance ratio is computed **per item** as the number of entries in its
-shared `hand_corrected` list divided by `expected_measures`, with a **<=5%**
-limit. It is a per-part ratio only for single-part items. Multipart items share
-one list and cannot record the same measure number separately for each part.
+For single-part items, `hand_corrected` remains a list of measure-number strings.
+For multipart items, record a mapping from MusicXML part IDs in `part_ids` to
+lists of measure numbers, for example `{"P1": ["7", "12a"], "P2": ["7"]}`.
+Duplicates are rejected within each part; the same number can appear in different
+parts. Unknown part IDs are rejected. The acceptance ratio is computed **per part**
+as that part's corrected count divided by the item's `expected_measures`, with a
+**<=5%** limit applied independently. `acceptance` has matching part-ID keys, each
+holding `hand_corrected_count`, `expected_measures`, `ratio`, `limit` and `accepted`.
+An omitted part has `null` acceptance (not reviewed); an empty list records a
+completed review with zero corrections. `hand_corrected: null` means no review.
+Schemas 1-5 still load with unknown `part_ids`. Old shared correction lists on
+multipart items retain the original item-wide ratio and flat acceptance object,
+but `accepted` is `null`: a shared list cannot establish per-part acceptance, even
+when its ratio is <=5%. This also applies while part IDs are unknown, because
+single-part identity has not been established. Old boolean acceptance values
+are validated against the original item-wide calculation and normalized on load.
+After a rerun confirms a single part, its list again yields boolean acceptance.
+Lists are never assigned to individual parts automatically.
+Rerun to populate `part_ids`, then replace the list with a mapping after reviewing
+each part to obtain per-part acceptance. Reruns preserve recorded corrections and
+stop before updating duration data if any previously recorded part ID disappears,
+including unreviewed parts omitted from the correction mapping. Additions are
+allowed; removals or replacements are rejected, keeping the previous review
+intact. The failure status retains the prior IDs and corrections without counts,
+suspects or signals from the rejected score.
+When editing `status.json` directly, update the derived `acceptance` block too;
+the reader recomputes and validates it rather than trusting stale ratios.
 Before review, acceptance is unknown. This human metric is separate from stage
 success and does not clear review warnings. See [Known accuracy limits](accuracy.md)
 for detection gaps and input-specific recognition settings. Rerunning recomputes
@@ -147,4 +180,4 @@ from the PDF and preserves the recorded human correction list; there is no autom
   defaults.
 - Successful stage checks establish structural properties, instrument metadata
   and style checks. Musical accuracy still depends on source-backed human review
-  and the <=5% per-item hand-correction ratio described above.
+  and the <=5% per-part hand-correction ratio described above.
