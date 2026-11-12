@@ -65,11 +65,13 @@ def test_measure_count_records_missing_and_extra_measures():
     assert sample(measures_read=62).measure_count.missing == -2
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 4])
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 5])
 def test_reads_legacy_schema_versions_and_preserves_review(tmp_path, version):
     path = tmp_path / "status.json"
     data = sample().to_dict()
-    del data["text_removals"]
+    del data["part_ids"]
+    if version < 5:
+        del data["text_removals"]
     if version < 4:
         del data["review_signals"]
         del data["review_required"]
@@ -86,7 +88,7 @@ def test_reads_legacy_schema_versions_and_preserves_review(tmp_path, version):
     assert read_status(path) == expected
     write_status(read_status(path), path)
     assert read_status(path) == expected
-    assert json.loads(path.read_text())["schema_version"] == 5
+    assert json.loads(path.read_text())["schema_version"] == 6
 
 
 def test_audiveris_options_round_trip(tmp_path):
@@ -118,6 +120,7 @@ def test_stable_key_order_and_bytes(tmp_path):
         "measure_count",
         "stages",
         "suspect_measures",
+        "part_ids",
         "hand_corrected",
         "acceptance",
         "tool_versions",
@@ -196,7 +199,7 @@ def test_invalid_values_raise(make, message):
     ("edit", "message"),
     [
         (lambda d: d["acceptance"].update(accepted=False), "does not match"),
-        (lambda d: d.update(schema_version=6), "schema_version"),
+        (lambda d: d.update(schema_version=7), "schema_version"),
         (lambda d: d.pop("audiveris_options"), "keys"),
         (lambda d: d.update(audiveris_options=[]), "audiveris_options"),
         (lambda d: d.update(audiveris_options={"constant": 600}), "audiveris_options"),
@@ -279,3 +282,69 @@ def test_text_removals_round_trip(tmp_path):
     path = tmp_path / "status.json"
     write_status(item, path)
     assert read_status(path) == item
+
+
+def test_per_part_corrections_round_trip_and_independent_acceptance(tmp_path):
+    item = sample(
+        part_ids=("P1", "P2", "P3"),
+        hand_corrected={"P1": ("7", "12a", "30"), "P2": ("7", "12a", "30", "31")},
+    )
+    path = tmp_path / "status.json"
+    write_status(item, path)
+    assert read_status(path) == item
+    data = item.to_dict()
+    assert data["hand_corrected"]["P1"][0] == data["hand_corrected"]["P2"][0] == "7"
+    assert data["acceptance"]["P1"]["ratio"] == 0.05
+    assert data["acceptance"]["P1"]["accepted"] is True
+    assert data["acceptance"]["P2"]["ratio"] == 0.066667
+    assert data["acceptance"]["P2"]["accepted"] is False
+    assert data["acceptance"]["P3"] is None
+    data["acceptance"]["P2"]["accepted"] = True
+    with pytest.raises(StatusError, match="acceptance"):
+        ItemStatus.from_dict(data)
+
+
+def test_per_part_empty_review_is_distinct_from_unreviewed():
+    item = sample(part_ids=("P1", "P2"), hand_corrected={"P1": ()})
+    assert item.acceptance["P1"].ratio == 0
+    assert item.acceptance["P1"].accepted
+    assert item.acceptance["P2"] is None
+    assert sample(part_ids=("P1", "P2"), hand_corrected={}).acceptance == {
+        "P1": None,
+        "P2": None,
+    }
+
+
+@pytest.mark.parametrize(
+    "hand",
+    [
+        {"P1": ("7", "7")},
+        {"P3": ()},
+        {"P1": (7,)},
+        {"P1": ("",)},
+        {"P1": "7"},
+    ],
+)
+def test_invalid_per_part_corrections_are_rejected(hand):
+    with pytest.raises(StatusError):
+        sample(part_ids=("P1", "P2"), hand_corrected=hand)
+
+
+@pytest.mark.parametrize("ids", [None, ("P1",), ("P1", "P1"), ("P1", "")])
+def test_per_part_corrections_require_valid_multipart_ids(ids):
+    with pytest.raises(StatusError):
+        sample(part_ids=ids, hand_corrected={"P1": ()})
+
+
+def test_shared_corrections_keep_legacy_acceptance_for_multipart():
+    item = sample(part_ids=("P1", "P2"))
+    assert item.acceptance == sample().acceptance
+    assert item.to_dict()["hand_corrected"] == ["7", "12a", "30"]
+
+
+@pytest.mark.parametrize("hand", [{"P1": [7]}, {"P1": "7"}, {"P1": ["7", "7"]}])
+def test_invalid_per_part_correction_files_are_rejected(hand):
+    data = sample(part_ids=("P1", "P2"), hand_corrected={}).to_dict()
+    data["hand_corrected"] = hand
+    with pytest.raises(StatusError, match="hand_corrected"):
+        ItemStatus.from_dict(data)

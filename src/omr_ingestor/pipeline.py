@@ -313,6 +313,12 @@ def _durations(ctx: _Context) -> str:
             "unsafe part identity: part IDs must be unique and match the score-part "
             "declarations; correct the MusicXML part IDs or rerun OMR before instrument fixup"
         )
+    ids = tuple(part_ids(root))
+    if isinstance(ctx.status.hand_corrected, dict) and (
+        len(ids) < 2 or not set(ctx.status.hand_corrected).issubset(ids)
+    ):
+        raise StageError("recorded hand_corrected part IDs do not match the current score")
+    ctx.status = replace(ctx.status, part_ids=ids)
     expected = ctx.status.expected_measures
     read = "/".join(map(str, counts)) or "0"
     if ctx.parts is not None:
@@ -492,6 +498,7 @@ def _prepare(manifest_path: Path, selector: str, output_dir: Path) -> _Context:
         expected_measures=item["expected_measures"],
         stages=tuple(Stage(name, StageState.PENDING) for name in STAGE_NAMES),
         hand_corrected=previous.hand_corrected if previous else None,
+        part_ids=previous.part_ids if previous else None,
         audiveris_options=dict(item.get("audiveris_options", {})),
     )
     return _Context(

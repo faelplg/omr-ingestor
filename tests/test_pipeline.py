@@ -685,3 +685,56 @@ def test_text_policy_runs_once_for_multipart_and_preserves_review(setup, monkeyp
     words = [el.text for el in fixed.iter("words")]
     assert all("Review: " + s.detail in words for s in status.review_signals)
     assert fixed.findtext(".//rehearsal") == ("A" if keep_text else "?")
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_multipart_hand_corrections_survive_rerun_and_reach_batch(
+    setup, monkeypatch, capsys, legacy
+):
+    configure_parts(setup, ["Trumpet 1", "Trumpet 2"])
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [multipart_xml()])))
+    monkeypatch.setenv(MUSESCORE_ENV_VAR, str(fake_musescore(setup.bin, two_trumpet_mscx())))
+    assert setup.run() == 0
+    status = setup.status()
+    assert status.part_ids == ("P1", "P2")
+    corrections = ("1",) if legacy else {"P1": ("1",), "P2": ("1", "2")}
+    reviewed = replace(status, hand_corrected=corrections)
+    data = reviewed.to_dict()
+    if legacy:
+        data["schema_version"] = 5
+        del data["part_ids"]
+    (setup.item_dir / "status.json").write_text(json.dumps(data))
+    capsys.readouterr()
+
+    assert main(["batch", "-o", str(setup.output), str(setup.manifest)]) == 0
+    status = setup.status()
+    assert status.hand_corrected == corrections
+    assert status.part_ids == ("P1", "P2")
+    summary = json.loads((setup.output / "batch.json").read_text())
+    acceptance = summary["items"][0]["acceptance"]
+    assert acceptance == status.to_dict()["acceptance"] == reviewed.to_dict()["acceptance"]
+    out = capsys.readouterr().out
+    if legacy:
+        assert acceptance["ratio"] == 0.333333
+        assert f"hand corrections: {STEM} shared: 1/3 (33.33%), above 5% limit" in out
+    else:
+        assert acceptance["P1"]["ratio"] == 0.333333
+        assert acceptance["P2"]["ratio"] == 0.666667
+        assert f"hand corrections: {STEM} P1: 1/3 (33.33%), above 5% limit" in out
+        assert f"hand corrections: {STEM} P2: 2/3 (66.67%), above 5% limit" in out
+
+
+def test_rerun_preserves_corrections_when_part_ids_change(setup, monkeypatch):
+    configure_parts(setup, ["Trumpet 1", "Trumpet 2"])
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [multipart_xml()])))
+    monkeypatch.setenv(MUSESCORE_ENV_VAR, str(fake_musescore(setup.bin, two_trumpet_mscx())))
+    assert setup.run() == 0
+    reviewed = replace(setup.status(), hand_corrected={"P2": ("1",)})
+    write_status(reviewed, setup.item_dir / "status.json")
+    xml = multipart_xml().replace('"P2"', '"P3"')
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [xml])))
+    assert setup.run() == 1
+    status = setup.status()
+    assert status.hand_corrected == {"P2": ("1",)}
+    assert status.part_ids == ("P1", "P2")
+    assert "part IDs do not match" in status.stage("durations").detail

@@ -9,13 +9,14 @@ Schema version 1 had no measure_count; such files still read, with measures_read
 Versions 1 and 2 did not record audiveris_options; these read as None (unknown).
 Versions 1-3 did not record review signals; these read as an empty tuple.
 Versions 1-4 did not record text removals; these read as None (unknown).
+Versions 1-5 did not record part_ids; shared correction lists retain item-wide acceptance.
 """
 
 import json
 import math
 import os
 import tempfile
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -23,8 +24,8 @@ from typing import Any
 from omr_ingestor.durations import REVIEW_SIGNAL_CODES, ReviewSignal
 from omr_ingestor.fixup import TEXT_REMOVAL_CATEGORIES
 
-SCHEMA_VERSION = 5
-READABLE_SCHEMA_VERSIONS = (1, 2, 3, 4, 5)
+SCHEMA_VERSION = 6
+READABLE_SCHEMA_VERSIONS = (1, 2, 3, 4, 5, 6)
 ACCEPTANCE_PERCENT = 5  # up to 5% of expected_measures corrected by hand
 ACCEPTANCE_LIMIT = ACCEPTANCE_PERCENT / 100
 RATIO_DIGITS = 6
@@ -100,7 +101,9 @@ class ItemStatus:
     stages: tuple[Stage, ...] = ()
     suspect_measures: tuple[SuspectMeasure, ...] = ()
     # None until the human review is done; () means reviewed with nothing corrected.
-    hand_corrected: tuple[str, ...] | None = None
+    hand_corrected: tuple[str, ...] | dict[str, tuple[str, ...]] | None = None
+    # MusicXML IDs in score order; None before counting or for legacy files.
+    part_ids: tuple[str, ...] | None = None
     tool_versions: dict[str, str] = field(default_factory=dict)
     # Overrides passed to Audiveris; {} uses tool defaults, None means not recorded.
     audiveris_options: dict[str, str] | None = field(default_factory=dict)
@@ -139,10 +142,17 @@ class ItemStatus:
         names = [s.name for s in self.stages]
         if len(set(names)) != len(names):
             raise StatusError(f"duplicate stage in {names}")
-        if self.hand_corrected is not None and len(set(self.hand_corrected)) != len(
-            self.hand_corrected
-        ):
-            raise StatusError(f"duplicate measure in hand_corrected {list(self.hand_corrected)}")
+        if self.part_ids is not None:
+            _validate_measures(self.part_ids, "part_ids")
+        if isinstance(self.hand_corrected, dict):
+            if self.part_ids is None or len(self.part_ids) < 2:
+                raise StatusError("per-part hand_corrected requires multipart part_ids")
+            for part_id, measures in self.hand_corrected.items():
+                if part_id not in self.part_ids:
+                    raise StatusError(f"unknown part ID in hand_corrected: {part_id!r}")
+                _validate_measures(measures, f"hand_corrected.{part_id}")
+        elif self.hand_corrected is not None:
+            _validate_measures(self.hand_corrected, "hand_corrected")
 
     def stage(self, name: str) -> Stage | None:
         return next((s for s in self.stages if s.name == name), None)
@@ -165,25 +175,33 @@ class ItemStatus:
             missing=self.expected_measures - self.measures_read,
         )
 
-    @property
-    def acceptance(self) -> Acceptance | None:
-        """The 5% criterion over expected_measures; None before the human review."""
-        if self.hand_corrected is None:
-            return None
-        count = len(self.hand_corrected)
-        ratio = round(count / self.expected_measures, RATIO_DIGITS)
+    def _acceptance(self, measures: tuple[str, ...]) -> Acceptance:
+        count = len(measures)
         return Acceptance(
             hand_corrected_count=count,
             expected_measures=self.expected_measures,
-            ratio=ratio,
+            ratio=round(count / self.expected_measures, RATIO_DIGITS),
             limit=ACCEPTANCE_LIMIT,
-            # Integer math, so the boundary (exactly 5%) is not lost to float rounding.
+            # Integer math preserves the exact 5% boundary.
             accepted=count * 100 <= ACCEPTANCE_PERCENT * self.expected_measures,
         )
 
+    @property
+    def acceptance(self) -> Acceptance | dict[str, Acceptance | None] | None:
+        """Per-part 5% criterion for mappings; legacy lists retain item-wide acceptance."""
+        if self.hand_corrected is None:
+            return None
+        if isinstance(self.hand_corrected, dict):
+            return {
+                part_id: self._acceptance(self.hand_corrected[part_id])
+                if part_id in self.hand_corrected
+                else None
+                for part_id in self.part_ids
+            }
+        return self._acceptance(self.hand_corrected)
+
     def to_dict(self) -> dict[str, Any]:
         """Plain data with a fixed key order."""
-        acceptance = self.acceptance
         count = self.measure_count
         return {
             "schema_version": SCHEMA_VERSION,
@@ -211,16 +229,15 @@ class ItemStatus:
             "suspect_measures": [
                 {"number": m.number, "detail": m.detail} for m in self.suspect_measures
             ],
-            "hand_corrected": None if self.hand_corrected is None else list(self.hand_corrected),
-            "acceptance": None
-            if acceptance is None
-            else {
-                "hand_corrected_count": acceptance.hand_corrected_count,
-                "expected_measures": acceptance.expected_measures,
-                "ratio": acceptance.ratio,
-                "limit": acceptance.limit,
-                "accepted": acceptance.accepted,
-            },
+            "part_ids": None if self.part_ids is None else list(self.part_ids),
+            "hand_corrected": {
+                part_id: list(measures) for part_id, measures in sorted(self.hand_corrected.items())
+            }
+            if isinstance(self.hand_corrected, dict)
+            else None
+            if self.hand_corrected is None
+            else list(self.hand_corrected),
+            "acceptance": acceptance_dict(self.acceptance),
             "tool_versions": dict(sorted(self.tool_versions.items())),
             "audiveris_options": None
             if self.audiveris_options is None
@@ -233,6 +250,26 @@ class ItemStatus:
             return _from_dict(cls, data, source)
         except (KeyError, TypeError, ValueError) as exc:
             raise StatusError(f"{source}: malformed status: {exc!r}") from exc
+
+
+def acceptance_dict(
+    acceptance: Acceptance | dict[str, Acceptance | None] | None,
+) -> dict[str, Any] | None:
+    if isinstance(acceptance, dict):
+        return {
+            part_id: None if value is None else asdict(value)
+            for part_id, value in acceptance.items()
+        }
+    return None if acceptance is None else asdict(acceptance)
+
+
+def _validate_measures(value: Any, where: str) -> None:
+    _expect(value, tuple, where)
+    for number in value:
+        if not _expect(number, str, where).strip():
+            raise StatusError(f"{where}: empty measure or part ID")
+    if len(set(value)) != len(value):
+        raise StatusError(f"duplicate measure or part ID in {where}: {list(value)}")
 
 
 def _expect(value: Any, typ: type | tuple[type, ...], where: str) -> Any:
@@ -261,12 +298,14 @@ _TOP_KEYS = (
     "measure_count",
     "stages",
     "suspect_measures",
+    "part_ids",
     "hand_corrected",
     "acceptance",
     "tool_versions",
     "audiveris_options",
 )
-_V4_TOP_KEYS = tuple(k for k in _TOP_KEYS if k != "text_removals")
+_V5_TOP_KEYS = tuple(k for k in _TOP_KEYS if k != "part_ids")
+_V4_TOP_KEYS = tuple(k for k in _V5_TOP_KEYS if k != "text_removals")
 _V3_TOP_KEYS = tuple(k for k in _V4_TOP_KEYS if k not in ("review_required", "review_signals"))
 _V2_TOP_KEYS = tuple(k for k in _V3_TOP_KEYS if k != "audiveris_options")
 _V1_TOP_KEYS = tuple(k for k in _V2_TOP_KEYS if k != "measure_count")
@@ -285,7 +324,8 @@ def _from_dict(cls: type[ItemStatus], data: Any, source: str) -> ItemStatus:
         2: _V2_TOP_KEYS,
         3: _V3_TOP_KEYS,
         4: _V4_TOP_KEYS,
-        5: _TOP_KEYS,
+        5: _V5_TOP_KEYS,
+        6: _TOP_KEYS,
     }
     keys = keys_by_version[version]
     if sorted(data) != sorted(keys):
@@ -317,10 +357,23 @@ def _from_dict(cls: type[ItemStatus], data: Any, source: str) -> ItemStatus:
         for i, m in enumerate(_expect(data["suspect_measures"], list, f"{source}.suspect_measures"))
     )
     hand = data["hand_corrected"]
-    if hand is not None:
+    if isinstance(hand, dict) and version >= 6:
+        hand = {
+            _expect(part_id, str, f"{source}.hand_corrected key"): tuple(
+                _expect(n, str, f"{source}.hand_corrected.{part_id}[{i}]")
+                for i, n in enumerate(_expect(numbers, list, f"{source}.hand_corrected.{part_id}"))
+            )
+            for part_id, numbers in hand.items()
+        }
+    elif hand is not None:
         hand = tuple(
             _expect(n, str, f"{source}.hand_corrected[{i}]")
             for i, n in enumerate(_expect(hand, list, f"{source}.hand_corrected"))
+        )
+    ids = data.get("part_ids")
+    if ids is not None:
+        ids = tuple(
+            _expect(n, str, f"{source}.part_ids") for n in _expect(ids, list, f"{source}.part_ids")
         )
     versions = _expect(data["tool_versions"], dict, f"{source}.tool_versions")
     for k, v in versions.items():
@@ -354,6 +407,7 @@ def _from_dict(cls: type[ItemStatus], data: Any, source: str) -> ItemStatus:
         stages=stages,
         suspect_measures=suspects,
         hand_corrected=hand,
+        part_ids=ids,
         tool_versions=dict(versions),
         audiveris_options=None if options is None else dict(options),
     )

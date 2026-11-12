@@ -22,10 +22,16 @@ from typing import Any
 from omr_ingestor.durations import ReviewSignal
 from omr_ingestor.manifest import ManifestError, load_manifest
 from omr_ingestor.pipeline import PipelineIOError, PipelineSetupError, UncountedReason, run_item
-from omr_ingestor.status import MeasureCount, StageState, write_text_atomic
+from omr_ingestor.status import (
+    Acceptance,
+    MeasureCount,
+    StageState,
+    acceptance_dict,
+    write_text_atomic,
+)
 
 BATCH_NAME = "batch.json"
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 PASSED = "passed"
 FAILED = "failed"
@@ -49,6 +55,7 @@ class BatchItem:
 
     review_signals: tuple[ReviewSignal, ...] = ()
     review_required: bool = False
+    acceptance: Acceptance | dict[str, Acceptance | None] | None = None
 
     @property
     def stem(self) -> str:
@@ -139,6 +146,7 @@ def _run_one(manifest_path: Path, index: int, entry: dict[str, Any], output_dir:
         measures_read=status.measures_read,
         review_signals=status.review_signals,
         review_required=status.review_required,
+        acceptance=status.acceptance,
         uncounted_reason=result.uncounted_reason,
         suspect_count=len(status.suspect_measures) if counted else None,
         failed_stage=None if failed is None else failed.name,
@@ -194,6 +202,7 @@ def _item_dict(item: BatchItem, output_dir: Path) -> dict[str, Any]:
             "missing": None if count is None else count.missing,
         },
         "suspect_count": item.suspect_count,
+        "acceptance": acceptance_dict(item.acceptance),
         "review_required": item.review_required,
         "review_signals": [
             {"code": s.code, "detail": s.detail, "part_id": s.part_id, "measure": s.measure}

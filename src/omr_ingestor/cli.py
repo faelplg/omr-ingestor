@@ -74,6 +74,23 @@ def _print_batch(result: BatchResult) -> None:
     print()
 
     for item in result.items:
+        if item.acceptance is not None:
+            entries = (
+                item.acceptance
+                if isinstance(item.acceptance, dict)
+                else {"shared": item.acceptance}
+            )
+            for part_id, acceptance in entries.items():
+                detail = (
+                    "not reviewed"
+                    if acceptance is None
+                    else (
+                        f"{acceptance.hand_corrected_count}/{acceptance.expected_measures} "
+                        f"({acceptance.ratio:.2%}), "
+                        + ("accepted" if acceptance.accepted else "above 5% limit")
+                    )
+                )
+                print(f"hand corrections: {item.stem} {part_id}: {detail}")
         for signal in item.review_signals:
             print(f"warning: {item.stem}: {signal.code}: {signal.detail}", file=sys.stderr)
     check = result.cross_part

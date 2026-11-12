@@ -92,7 +92,7 @@ def test_all_items_pass_and_agree(batch: Batch, capsys):
         assert status.instrument == instrument
         assert (batch.output / stem / f"{stem}.mscz").exists()
     summary = batch.summary()
-    assert summary["schema_version"] == 3
+    assert summary["schema_version"] == 4
     assert summary["passed"] is True
     assert [it["stem"] for it in summary["items"]] == list(PARTS)
     assert summary["items"][0] == {
@@ -104,6 +104,7 @@ def test_all_items_pass_and_agree(batch: Batch, capsys):
         "error": None,
         "measures": {"read": 3, "expected": 3, "missing": 0},
         "suspect_count": 1,
+        "acceptance": None,
         "review_required": True,
         "review_signals": [],
         "status_file": "song-trumpet/status.json",

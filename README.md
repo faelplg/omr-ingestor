@@ -46,8 +46,8 @@ One `.mscz` contains all parts.
 
 ### Review signals
 
-A successful conversion still needs source review. `status.json` (schema 5) and
-`batch.json` items (schema 3) expose `review_required` and `review_signals`, independently
+A successful conversion still needs source review. `status.json` (schema 6) and
+`batch.json` items (schema 4) expose `review_required` and `review_signals`, independently
 of stage success and duration suspects. Each signal contains `code`, `detail`,
 `part_id` and `measure` (empty strings mean score-wide or part-wide scope).
 
@@ -111,7 +111,7 @@ Review signals, including `navigation_lyric`, are always computed from the raw
 export. Cleanup runs once across all parts before our `?` marks and `Review: ...`
 annotations are inserted, before final XSD validation and MuseScore conversion.
 
-`status.json` schema 5 records `text_removals` with element counts for `credits`,
+`status.json` schema 6 records `text_removals` with element counts for `credits`,
 `headers`, `lyrics`, `words`, `rehearsals` and `technical`. A removed work or
 miscellaneous block counts as one element, regardless of its children. Empty
 wrappers do not count. With `keep_text: true` all counts are zero. Before fixup
@@ -121,7 +121,7 @@ completes, or when reading status schemas 1-4, the field is `null` (unknown).
 
 An item can supply `audiveris_options`, a map of fully qualified constant names to scalar strings. Each entry becomes a separate `-option name=value` argument, recorded in the item's `audiveris/audiveris.log`. Names must start with `org.audiveris.omr.`; values allow letters, digits, `_`, `.`, `+` and `-`. Omitting the map keeps the installed Audiveris defaults. Options apply only to that item on both `run` and `batch`. Audiveris owns the constant names and their meanings; check its log for unsupported settings when changing tool versions.
 
-The effective override map is recorded next to `tool_versions` in `status.json` (schema 5) and each `batch.json` item (schema 3). An empty map means tool defaults were used. Older status schemas remain readable with unknown options represented as `null`; batch items that never started also record `null`.
+The effective override map is recorded next to `tool_versions` in `status.json` (schema 6) and each `batch.json` item (schema 4). An empty map means tool defaults were used. Older status schemas remain readable with unknown options represented as `null`; batch items that never started also record `null`.
 
 For a single-instrument page surrounded by a decorative frame:
 
