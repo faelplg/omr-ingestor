@@ -57,12 +57,15 @@ flowchart TB
    remain accepted. A `<multiple-rest>` start is suspect even
    when its duration adds up; missing rest content is not reconstructed. Records
    each part's measure count against `expected_measures`. Independently records
-   `measure_count_mismatch`, `part_count_mismatch`, `part_identity`,
-   `part_identity_changed` and `navigation_lyric` review signals from the raw export. Unsafe part IDs fail
+   `measure_count_mismatch`, `part_count_mismatch`, `part_identity` and
+   `navigation_lyric` review signals from the raw export. Unsafe part IDs fail
    this stage after the signal is saved, before fixup can transform an ambiguous
-   part. `measure_count_mismatch` and `navigation_lyric` warnings alone do not
-   fail conversion. A `part_count_mismatch` is recorded here, but an incompatible
-   number of parts fails the later fixup stage.
+   part. On reruns with identity-backed per-part reviews,
+   `part_identity_changed` fails this stage before fixup when a reviewed part's
+   raw name or instruments differ. `measure_count_mismatch` and
+   `navigation_lyric` warnings alone do not fail conversion. A
+   `part_count_mismatch` is recorded here, but an incompatible number of parts
+   fails the later fixup stage.
 4. **Fixup and XSD again.** Requires one part or exactly the count in the item's
    `parts` list, with one staff per part. Applies instrument metadata, clef,
    transposition, sound and configured display names without changing pitches.

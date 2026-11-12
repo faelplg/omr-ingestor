@@ -20,19 +20,19 @@ acceptance to `null`. A `part_identity_changed` signal in `status.json`
 explains why each part needs source review again. Names and instruments come
 from the raw OMR score, before manifest-based fixup overwrites them. Identical
 or absent metadata can still hide swapped music; this check does not prove
-musical continuity.
+musical continuity. For an intentional change that preserves IDs, remove only
+the affected part's `hand_corrected` entry and clear its derived acceptance by
+setting `acceptance.<part ID>` to `null`, then rerun. Other parts keep their
+reviews. After the new identity is captured, review that part against the
+source and record its corrections again. Missing prior IDs still require a
+fresh review. Alternatively, restoring the original score clears the change
+signal and restores acceptance on a successful rerun.
 
 Older status files still load. Schemas 1-6 have no identity metadata and keep
 ID-only matching for their existing corrections, including on repeated reruns.
 They cannot detect renumbering that reuses the same IDs. Archive the prior status
 and rerun before recording a fresh source-backed review to enable metadata
-checking. For an intentional change that preserves IDs, remove only the affected
-part's `hand_corrected` entry and clear its derived acceptance by setting
-`acceptance.<part ID>` to `null`, then rerun. Other parts keep their reviews. After
-the new identity is captured, review that part against the source and record its
-corrections again. Missing prior IDs still require a fresh review. Alternatively,
-restoring the original score clears the change signal and restores acceptance on
-a successful rerun.
+checking.
 
 A multipart item's old shared list keeps its
 original item-wide ratio, including after rerunning, but `accepted` is `null`.
