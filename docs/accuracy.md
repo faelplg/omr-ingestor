@@ -13,9 +13,15 @@ acceptance); empty lists mean reviewed with no corrections. Every part needs
 source-backed review and must independently meet the <=5% limit.
 
 Older status files still load. A multipart item's old shared list keeps its
-original item-wide ratio, including after rerunning, until the reviewer explicitly
-replaces it with per-part lists. It does not establish per-part acceptance. See
-[Architecture](architecture.md) for the status fields and migration workflow.
+original item-wide ratio, including after rerunning, but `accepted` is `null`.
+A <=5% shared ratio does not establish per-part acceptance. The batch JSON marks
+its `acceptance_scope` as `legacy_item_wide`, and the terminal summary identifies
+it as legacy item-wide with per-part acceptance unknown. The reviewer must
+explicitly replace it with per-part lists after source review. Flat lists with
+unknown part IDs also have unknown acceptance until a rerun establishes their
+part identity; a confirmed single part retains boolean acceptance and has no
+shared label in the terminal summary. See [Architecture](architecture.md) for the
+status fields and migration workflow.
 A zero-suspect report is not acceptance, and recording `hand_corrected` does not
 clear review warnings.
 

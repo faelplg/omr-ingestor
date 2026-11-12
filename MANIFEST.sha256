@@ -1,7 +1,7 @@
 b0e6468e007f50eb0b04733f75e812e3a6da871c1a8953d4c37a9585b8133c03  ./.gitignore
 5ade4b66724e6f853ce26b561fee1a74ae75f4871040688b0ebb6b4a25ec6371  ./README.md
-a7d6cf71680e4e8cc7b09a6bead5c1c842ad175508ae07595c70b76aa3f24ede  ./docs/accuracy.md
-5ef6e52ae574d7baea717dca02cd3f7937a33fc02e187a7c6f230ca0561edeeb  ./docs/architecture.md
+24123b5240a947fef9cd204de075d6ad5287a1c874f074df09d4eb2d8fc5744a  ./docs/accuracy.md
+7b1c67202d9d73a336bc2f1066c73e7b42373117fd9f9f0f3e970614fc2e4c70  ./docs/architecture.md
 624dfcdee7fd1988ffbc71b8b6208bffc70da2999105bc3146f5b3d04ef2c519  ./docs/music.schema.json
 4251b2c1df82463866af88790f9aa360a49f8640bc2bfe26838b1a6eb4f493d6  ./examples/music.example.json
 8dedf7fcffff28f64484bd38af58fe633fd91d82fd1dd27e20bddad918722325  ./instruments.json

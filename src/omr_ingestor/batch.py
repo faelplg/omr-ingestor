@@ -58,6 +58,14 @@ class BatchItem:
     acceptance: Acceptance | dict[str, Acceptance | None] | None = None
 
     @property
+    def acceptance_scope(self) -> str | None:
+        if self.acceptance is None:
+            return None
+        if isinstance(self.acceptance, dict):
+            return "per_part"
+        return "legacy_item_wide" if self.acceptance.accepted is None else "single_part"
+
+    @property
     def stem(self) -> str:
         return Path(self.pdf).stem
 
@@ -203,6 +211,7 @@ def _item_dict(item: BatchItem, output_dir: Path) -> dict[str, Any]:
         },
         "suspect_count": item.suspect_count,
         "acceptance": acceptance_dict(item.acceptance),
+        "acceptance_scope": item.acceptance_scope,
         "review_required": item.review_required,
         "review_signals": [
             {"code": s.code, "detail": s.detail, "part_id": s.part_id, "measure": s.measure}

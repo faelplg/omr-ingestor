@@ -1,6 +1,7 @@
 import hashlib
 import json
 import shutil
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -11,7 +12,7 @@ from omr_ingestor.batch import FAILED, PASSED, BatchItem, BatchResult, check_cro
 from omr_ingestor.cli import _print_batch, main
 from omr_ingestor.musescore import MUSESCORE_ENV_VAR
 from omr_ingestor.pipeline import UncountedReason
-from omr_ingestor.status import read_status
+from omr_ingestor.status import read_status, write_status
 from omr_ingestor.xsd import XSD_ENV_VAR
 from tests.fake_tools import ANY_SCORE_XSD, fake_audiveris, fake_musescore
 from tests.mscx_builders import instrument_mscx, style_xml
@@ -105,6 +106,7 @@ def test_all_items_pass_and_agree(batch: Batch, capsys):
         "measures": {"read": 3, "expected": 3, "missing": 0},
         "suspect_count": 1,
         "acceptance": None,
+        "acceptance_scope": None,
         "review_required": True,
         "review_signals": [],
         "status_file": "song-trumpet/status.json",
@@ -378,3 +380,16 @@ def test_batch_warns_once_for_each_uncounted_cause(tmp_path, capsys):
         "warning: measures not counted (failed before durations): early",
         "warning: parts read different measure counts: multi, other-multi",
     ]
+
+
+def test_single_part_corrections_are_not_labelled_shared(batch: Batch, capsys):
+    assert batch.run() == 0
+    path = batch.output / "song-trumpet" / "status.json"
+    write_status(replace(read_status(path), hand_corrected=("1",)), path)
+    capsys.readouterr()
+    assert batch.run() == 0
+    out = capsys.readouterr().out
+    assert "hand corrections: song-trumpet: 1/3 (33.33%), above 5% limit" in out
+    assert "shared" not in out
+    assert "legacy item-wide" not in out
+    assert batch.items()["song-trumpet"]["acceptance_scope"] == "single_part"

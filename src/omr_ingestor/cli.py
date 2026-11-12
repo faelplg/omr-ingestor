@@ -78,7 +78,9 @@ def _print_batch(result: BatchResult) -> None:
             entries = (
                 item.acceptance
                 if isinstance(item.acceptance, dict)
-                else {"shared": item.acceptance}
+                else {
+                    "legacy item-wide" if item.acceptance.accepted is None else "": item.acceptance
+                }
             )
             for part_id, acceptance in entries.items():
                 detail = (
@@ -87,10 +89,17 @@ def _print_batch(result: BatchResult) -> None:
                     else (
                         f"{acceptance.hand_corrected_count}/{acceptance.expected_measures} "
                         f"({acceptance.ratio:.2%}), "
-                        + ("accepted" if acceptance.accepted else "above 5% limit")
+                        + (
+                            "per-part acceptance unknown"
+                            if acceptance.accepted is None
+                            else "accepted"
+                            if acceptance.accepted
+                            else "above 5% limit"
+                        )
                     )
                 )
-                print(f"hand corrections: {item.stem} {part_id}: {detail}")
+                label = f" {part_id}" if part_id else ""
+                print(f"hand corrections: {item.stem}{label}: {detail}")
         for signal in item.review_signals:
             print(f"warning: {item.stem}: {signal.code}: {signal.detail}", file=sys.stderr)
     check = result.cross_part

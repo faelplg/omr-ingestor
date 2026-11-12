@@ -99,8 +99,10 @@ positives for ordinary words. Count warnings are anchored at the part's first
 measure and cannot locate missing content. See the [README review signals](../README.md#review-signals)
 for the precise behavior and score annotations.
 
-Status schema 6 records `part_ids` (MusicXML IDs in score order), unknown before
-the durations stage or when reading schemas 1-5. The `text_removals` field,
+Status schema 6 records `part_ids` (MusicXML IDs in score order). On a first run,
+they are unknown until the durations stage succeeds. A rerun retains the previous
+IDs until that stage validates the new score; schemas 1-5 load with unknown IDs.
+The `text_removals` field,
 introduced by [PR #29](https://github.com/faelplg/omr-ingestor/pull/29) in schema 5,
 records element counts for credits, headers, lyrics, words, rehearsals and
 text-like technical marks. Counts are zero with `keep_text: true`,
@@ -113,6 +115,10 @@ manifest lists, using available shared counts and each item's expected count.
 `batch.json` schema 4 contains item outcomes, review state, acceptance and
 cross-part agreement. Its per-item `acceptance` matches the status file, including
 per-part ratios for correction mappings; the terminal summary also prints them.
+`acceptance_scope` identifies `per_part`, `single_part`, or `legacy_item_wide`
+acceptance (`null` before review). The terminal uses a part ID for mappings, no
+part label for a single-part list, and an explicit legacy item-wide label for
+flat lists without confirmed single-part identity.
 Count disagreements are warnings; batch exits successfully only when all items
 pass their stages.
 
@@ -129,10 +135,17 @@ An omitted part has `null` acceptance (not reviewed); an empty list records a
 completed review with zero corrections. `hand_corrected: null` means no review.
 Schemas 1-5 still load with unknown `part_ids`. Old shared correction lists on
 multipart items retain the original item-wide ratio and flat acceptance object,
-even after a rerun. They are never assigned to individual parts automatically.
+but `accepted` is `null`: a shared list cannot establish per-part acceptance, even
+when its ratio is <=5%. This also applies while part IDs are unknown, because
+single-part identity has not been established. Old boolean acceptance values
+are validated against the original item-wide calculation and normalized on load.
+After a rerun confirms a single part, its list again yields boolean acceptance.
+Lists are never assigned to individual parts automatically.
 Rerun to populate `part_ids`, then replace the list with a mapping after reviewing
 each part to obtain per-part acceptance. Reruns preserve recorded corrections and
-stop if a recorded part ID no longer exists, keeping the previous review intact.
+stop before updating duration data if recorded part IDs no longer match the new
+score, keeping the previous review intact. The failure status retains the prior
+IDs and corrections without counts, suspects or signals from the rejected score.
 When editing `status.json` directly, update the derived `acceptance` block too;
 the reader recomputes and validates it rather than trusting stale ratios.
 Before review, acceptance is unknown. This human metric is separate from stage

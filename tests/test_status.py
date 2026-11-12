@@ -31,6 +31,7 @@ def sample(**changes) -> ItemStatus:
             SuspectMeasure("12a"),
         ),
         "hand_corrected": ("7", "12a", "30"),
+        "part_ids": ("P1",),
         "tool_versions": {"musescore": "4.7.5", "audiveris": "5.11.0"},
     }
     fields.update(changes)
@@ -82,6 +83,7 @@ def test_reads_legacy_schema_versions_and_preserves_review(tmp_path, version):
     data["schema_version"] = version
     path.write_text(json.dumps(data), encoding="utf-8")
     expected = sample(
+        part_ids=None,
         audiveris_options=None if version < 3 else {},
         measures_read=None if version == 1 else 51,
     )
@@ -336,10 +338,30 @@ def test_per_part_corrections_require_valid_multipart_ids(ids):
         sample(part_ids=ids, hand_corrected={"P1": ()})
 
 
-def test_shared_corrections_keep_legacy_acceptance_for_multipart():
-    item = sample(part_ids=("P1", "P2"))
-    assert item.acceptance == sample().acceptance
-    assert item.to_dict()["hand_corrected"] == ["7", "12a", "30"]
+@pytest.mark.parametrize("corrected", [(), ("7", "12a", "30"), ("7", "12a", "30", "31")])
+def test_shared_multipart_corrections_have_unknown_acceptance(corrected):
+    item = sample(part_ids=("P1", "P2"), hand_corrected=corrected)
+    assert item.acceptance.accepted is None
+    assert item.to_dict()["acceptance"]["accepted"] is None
+    assert item.acceptance.ratio == round(len(corrected) / 60, 6)
+    assert item.to_dict()["hand_corrected"] == list(corrected)
+
+
+def test_flat_corrections_with_unknown_part_ids_have_unknown_acceptance():
+    assert sample(part_ids=None).acceptance.accepted is None
+
+
+@pytest.mark.parametrize("accepted", [True, False])
+def test_reads_old_multipart_flat_acceptance_without_claiming_per_part_success(accepted):
+    corrected = ("1",) if accepted else tuple(str(n) for n in range(4))
+    data = sample(part_ids=("P1", "P2"), hand_corrected=corrected).to_dict()
+    data["acceptance"]["accepted"] = accepted
+    item = ItemStatus.from_dict(data)
+    assert item.acceptance.accepted is None
+    assert item.to_dict()["acceptance"]["accepted"] is None
+    data["acceptance"]["accepted"] = not accepted
+    with pytest.raises(StatusError, match="acceptance"):
+        ItemStatus.from_dict(data)
 
 
 @pytest.mark.parametrize("hand", [{"P1": [7]}, {"P1": "7"}, {"P1": ["7", "7"]}])

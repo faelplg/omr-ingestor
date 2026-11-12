@@ -285,6 +285,16 @@ def _xsd(ctx: _Context) -> str:
 
 def _durations(ctx: _Context) -> str:
     root = read_musicxml(ctx.raw_musicxml)
+    ids = tuple(part_ids(root))
+    signals = check_review_signals(
+        root, ctx.status.expected_measures, len(ctx.parts) if ctx.parts is not None else 1
+    )
+    if isinstance(ctx.status.hand_corrected, dict) and (
+        len(ids) < 2
+        or not set(ctx.status.hand_corrected).issubset(ids)
+        or any(signal.code == "part_identity" for signal in signals)
+    ):
+        raise StageError("recorded hand_corrected part IDs do not match the current score")
     report = check_durations(root)
     ctx.report = report
     suspects = report.suspects
@@ -293,9 +303,7 @@ def _durations(ctx: _Context) -> str:
     ctx.status = replace(
         ctx.status,
         suspect_measures=tuple(SuspectMeasure(m.number, m.describe()) for m in suspects),
-        review_signals=check_review_signals(
-            root, ctx.status.expected_measures, len(ctx.parts) if ctx.parts is not None else 1
-        ),
+        review_signals=signals,
         measures_read=counts[0]
         if len(counts) == 1 or (ctx.parts is not None and len(set(counts)) == 1)
         else None,
@@ -313,11 +321,6 @@ def _durations(ctx: _Context) -> str:
             "unsafe part identity: part IDs must be unique and match the score-part "
             "declarations; correct the MusicXML part IDs or rerun OMR before instrument fixup"
         )
-    ids = tuple(part_ids(root))
-    if isinstance(ctx.status.hand_corrected, dict) and (
-        len(ids) < 2 or not set(ctx.status.hand_corrected).issubset(ids)
-    ):
-        raise StageError("recorded hand_corrected part IDs do not match the current score")
     ctx.status = replace(ctx.status, part_ids=ids)
     expected = ctx.status.expected_measures
     read = "/".join(map(str, counts)) or "0"
