@@ -982,3 +982,27 @@ def test_prepare_carries_only_identity_changes_for_reviewed_parts(setup, correct
     write_status(previous, ctx.paths.status)
     prepared = _prepare(setup.manifest, "0", setup.output)
     assert prepared.status.review_signals == ((signals[2],) if corrections == {"P1": ()} else ())
+
+
+def test_review_pipeline_output_survives_rerun(setup: Setup, capsys):
+    assert setup.run() == 0
+    before = {
+        p.relative_to(setup.item_dir): p.read_bytes()
+        for p in setup.item_dir.rglob("*")
+        if p.is_file() and p.name != "status.json"
+    }
+    assert main(["review", str(setup.item_dir), "2"]) == 0
+    reviewed = setup.status()
+    assert reviewed.hand_corrected == ("2",)
+    assert reviewed.acceptance.ratio == 0.333333
+    assert reviewed.acceptance.accepted is False
+    assert {
+        p.relative_to(setup.item_dir): p.read_bytes()
+        for p in setup.item_dir.rglob("*")
+        if p.is_file() and p.name != "status.json"
+    } == before
+    assert setup.run() == 0
+    rerun = setup.status()
+    assert rerun.hand_corrected == reviewed.hand_corrected
+    assert rerun.part_identities == reviewed.part_identities
+    assert rerun.acceptance == reviewed.acceptance

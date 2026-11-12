@@ -20,32 +20,47 @@ acceptance to `null`. A `part_identity_changed` signal in `status.json`
 explains why each part needs source review again. Names and instruments come
 from the raw OMR score, before manifest-based fixup overwrites them. Identical
 or absent metadata can still hide swapped music; this check does not prove
-musical continuity. For an intentional change that preserves IDs, remove only
-the affected part's `hand_corrected` entry and clear its derived acceptance by
-setting `acceptance.<part ID>` to `null`, then rerun. Other parts keep their
-reviews. After the new identity is captured, review that part against the
-source and record its corrections again. Missing prior IDs still require a
-fresh review. Alternatively, restoring the original score clears the change
-signal and restores acceptance on a successful rerun.
+musical continuity. After reviewing an intentionally changed part against the
+source again, replace its review with the command:
+
+```sh
+uv run omr-ingestor review output/song-duet 7 12a --part P1 --replace --dry-run
+uv run omr-ingestor review output/song-duet 7 12a --part P1 --replace
+```
+
+This records the current raw identity for that part, clears only its
+`part_identity_changed` signal, and recomputes the entire acceptance block,
+including `null` for unreviewed parts. Other review signals remain. Rerun the
+pipeline to complete stages that stopped on the identity change. Missing or
+reordered prior IDs still require a rerun before recording corrections.
+Alternatively, restoring the original score clears the change signal and
+restores acceptance on a successful rerun.
 
 Older status files still load. Schemas 1-6 have no identity metadata and keep
-ID-only matching for their existing corrections, including on repeated reruns.
-They cannot detect renumbering that reuses the same IDs. Archive the prior status
-and rerun before recording a fresh source-backed review to enable metadata
-checking.
+ID-only matching for existing corrections, including on repeated reruns. The
+command preserves that provenance when other parts still have legacy reviews.
+Archive the prior status and rerun before recording fresh source-backed reviews
+for all parts to enable metadata checking.
 
 A multipart item's old shared list keeps its
 original item-wide ratio, including after rerunning, but `accepted` is `null`.
 A <=5% shared ratio does not establish per-part acceptance. The batch JSON marks
 its `acceptance_scope` as `legacy_item_wide`, and the terminal summary identifies
-it as legacy item-wide with per-part acceptance unknown. The reviewer must
-explicitly replace it with per-part lists after source review. Flat lists with
-unknown part IDs also have unknown acceptance until a rerun establishes their
+it as legacy item-wide with per-part acceptance unknown. After source review,
+use `review output/<item> --part P1 --replace` to replace the shared list with a
+review for P1, then record each remaining part separately. This
+explicit replacement discards the shared list; it is never assigned to a part
+automatically. Flat lists with unknown part IDs also have unknown acceptance until a rerun establishes their
 part identity; a confirmed single part retains boolean acceptance and has no
 shared label in the terminal summary. See [Architecture](architecture.md) for the
 status fields and migration workflow.
-A zero-suspect report is not acceptance, and recording `hand_corrected` does not
-clear review warnings.
+
+Use `review output/<item> 7 12a` for a single-part item, or add `--part P1`
+for a multipart item. Without `--replace`, the command adds measures; duplicate
+entries and unknown labels are errors. With no measures, `--replace` records an
+empty list (reviewed with no corrections). Acceptance ratios use the status
+model's six-decimal rounding. No score files are modified. A zero-suspect report
+is not acceptance, and recording corrections does not clear musical review warnings.
 
 The initial six-instrument review ([#15](https://github.com/faelplg/omr-ingestor/issues/15))
 found useful duration suspects, missed multi-measure rests, tied whole notes

@@ -7,8 +7,10 @@ from pathlib import Path
 from omr_ingestor.batch import BatchItem, BatchResult, run_batch
 from omr_ingestor.instruments import InstrumentsError, load_instruments
 from omr_ingestor.manifest import ManifestError, load_manifest
+from omr_ingestor.musicxml import MusicXMLError
 from omr_ingestor.pipeline import PipelineSetupError, RunResult, UncountedReason, run_item
-from omr_ingestor.status import StageState
+from omr_ingestor.review import record_review
+from omr_ingestor.status import StageState, StatusError, dumps_status
 
 
 def _print_run(result: RunResult) -> None:
@@ -168,6 +170,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     batch.add_argument("manifest", type=Path)
     batch.add_argument("-o", "--output", type=Path, required=True, help="output folder")
+    review = sub.add_parser("review", help="record hand-corrected measures after source review")
+    review.add_argument("item_dir", type=Path, help="item folder containing status.json")
+    review.add_argument(
+        "measures", nargs="*", help="measure numbers exactly as written in MusicXML"
+    )
+    review.add_argument("--part", help="MusicXML part ID; required for multipart items")
+    review.add_argument("--replace", action="store_true", help="replace the part's correction list")
+    review.add_argument(
+        "--dry-run", action="store_true", help="print updated status without writing"
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -178,6 +190,15 @@ def main(argv: list[str] | None = None) -> int:
             result = run_item(args.manifest, args.item, args.output)
             _print_run(result)
             return 0 if result.ok else 1
+        elif args.command == "review":
+            result = record_review(
+                args.item_dir,
+                args.measures,
+                part_id=args.part,
+                replace_existing=args.replace,
+                dry_run=args.dry_run,
+            )
+            print(dumps_status(result), end="")
         elif args.command == "batch":
             result = run_batch(args.manifest, args.output, on_item=_print_item)
             _print_batch(result)
@@ -189,7 +210,14 @@ def main(argv: list[str] | None = None) -> int:
                     f"{inst.id}\t{inst.clef}\t"
                     f"diatonic={t.diatonic} chromatic={t.chromatic} octave={t.octave_change}"
                 )
-    except (ManifestError, InstrumentsError, PipelineSetupError) as exc:
+    except (
+        ManifestError,
+        InstrumentsError,
+        PipelineSetupError,
+        StatusError,
+        MusicXMLError,
+        OSError,
+    ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     return 0
