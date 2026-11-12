@@ -1,4 +1,6 @@
 import json
+import xml.etree.ElementTree as ET
+from importlib.resources import files
 
 import pytest
 
@@ -73,10 +75,16 @@ def test_sound_fields_are_required(write_json, field):
 @pytest.mark.parametrize(
     ("changes", "match"),
     [
-        ({"instrument_sound": None}, r"instrument_sound: expected str"),
-        ({"instrument_sound": 57}, r"instrument_sound: expected str"),
-        ({"instrument_sound": ""}, r"instrument_sound: expected a non-empty sound id"),
-        ({"instrument_sound": "  "}, r"instrument_sound: expected a non-empty sound id"),
+        ({"instrument_sound": None}, r"instrument_sound \(instrument 'bb-trumpet'\): expected str"),
+        ({"instrument_sound": 57}, r"instrument_sound \(instrument 'bb-trumpet'\): expected str"),
+        (
+            {"instrument_sound": ""},
+            r"instrument_sound \(instrument 'bb-trumpet'\): expected a non-empty sound id",
+        ),
+        (
+            {"instrument_sound": "  "},
+            r"instrument_sound \(instrument 'bb-trumpet'\): expected a non-empty sound id",
+        ),
         ({"midi_program": "57"}, r"midi_program: expected int"),
         ({"midi_program": 57.0}, r"midi_program: expected int"),
         ({"midi_program": True}, r"midi_program: expected int"),
@@ -117,3 +125,41 @@ def test_midi_program_boundaries_are_valid(write_json, program):
 def test_malformed_file_fails_clearly(write_json, data, match):
     with pytest.raises(InstrumentsError, match=match):
         load_instruments(write_json(data, "instruments.json"))
+
+
+@pytest.mark.parametrize(
+    ("sound", "expected_message"),
+    [
+        ("brass.trumpt", "unknown MusicXML sound id"),
+        ("BRASS.TUBA", "unknown MusicXML sound id"),
+        ("brass", "unknown MusicXML sound id"),
+        (" brass.tuba", "leading/trailing whitespace"),
+        ("brass.tuba ", "leading/trailing whitespace"),
+        ("\tbrass.tuba", "leading/trailing whitespace"),
+        ("brass.tuba\n", "leading/trailing whitespace"),
+        ("\u00a0brass.tuba", "leading/trailing whitespace"),
+        ("brass.tuba\u00a0", "leading/trailing whitespace"),
+        ("", "non-empty"),
+        ("  ", "non-empty"),
+        (None, "expected str"),
+        (57, "expected str"),
+    ],
+)
+def test_invalid_sound_id_names_instrument_and_bad_value(write_json, sound, expected_message):
+    path = write_json([entry(instrument_sound=sound)])
+    with pytest.raises(InstrumentsError, match=expected_message) as exc:
+        load_instruments(path)
+    message = str(exc.value)
+    assert message.startswith(f"{path}[0].instrument_sound (instrument 'bb-trumpet'):")
+    assert repr(sound) in message
+
+
+def test_accepts_every_vendored_sound_id(write_json):
+    sounds = ET.fromstring(files("omr_ingestor").joinpath("data/sounds.xml").read_bytes())
+    ids = [sound.attrib["id"] for sound in sounds.findall("sound")]
+    assert len(ids) == 894
+    assert "brass.trumpet.bflat" in ids
+    assert len(ids) == len(set(ids))
+    data = [entry(id=f"instrument-{i}", instrument_sound=sound) for i, sound in enumerate(ids)]
+    table = load_instruments(write_json(data))
+    assert [instrument.instrument_sound for instrument in table] == ids

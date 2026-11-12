@@ -21,10 +21,12 @@ Every stage of `docs/architecture.md` is implemented, per item (`run`) and over 
 ID) and `midi_program` (General MIDI program, 1-based, from 1 to 128). Both fields
 are required. Fixup reads them directly from the instrument entry.
 
-All six sound IDs were checked against the W3C MusicXML
-[`sounds.xml`](https://github.com/w3c/musicxml/blob/gh-pages/schema/sounds.xml)
-on 2026-11-12. The sound IDs and MIDI programs are carried over unchanged from
-the original fixup table, preserving the existing MusicXML output.
+Sound IDs must match an ID in the vendored W3C MusicXML 4.0
+[`sounds.xml`](src/omr_ingestor/data/sounds.xml). Leading or trailing whitespace
+and unknown IDs are rejected when loading the table, with errors naming the
+instrument and invalid value. See the [source note](src/omr_ingestor/data/README.md).
+The sound IDs and MIDI programs are carried over unchanged from the original
+fixup table, preserving the existing MusicXML output.
 
 ## Usage
 
