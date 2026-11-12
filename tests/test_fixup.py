@@ -174,22 +174,55 @@ def test_fix_instrument_file_round_trip(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("instrument_id", "expected_sha256"),
+    ("instrument_id", "marked_sha256", "unmarked_sha256"),
     [
-        ("bb-trumpet", "43c12b66e3457ee1b7fd212d10dbfbfc0a206e52078661ce93d2d93dabaaec33"),
-        ("trombone", "dfb03e3881532bdd393107d15c02a588a3e97808db5d72b9096f9071c19b5633"),
-        ("flute", "628dcfebc95e723124c61747475d1c949359713f41bb462fa3e8c6a0cefad2a4"),
-        ("alto-saxophone", "7d68715da37acb553e9c4173273350c13eee5af3a37212b6c36592a56cf92c8c"),
-        ("tenor-saxophone", "0eeb9a6622517eeaffc9d968132c35958c1b4b735a0bde0dd599b024ef3628b1"),
-        ("tuba", "2d1fa39d3fb5b6c5f1eaeeb04624104a0aca6ab73a50eb706a7cc01c9ee34be4"),
+        (
+            "bb-trumpet",
+            "43c12b66e3457ee1b7fd212d10dbfbfc0a206e52078661ce93d2d93dabaaec33",
+            "c3a6322ba68287f89c267532e5fc1f013895d9ef394aa4dcdb30a29bfa913cbf",
+        ),
+        (
+            "trombone",
+            "dfb03e3881532bdd393107d15c02a588a3e97808db5d72b9096f9071c19b5633",
+            "a39270e628a45ad41bce91b44444ac7383c8610aa6122c341fecfa639792a592",
+        ),
+        (
+            "flute",
+            "628dcfebc95e723124c61747475d1c949359713f41bb462fa3e8c6a0cefad2a4",
+            "dea00593a8fd9f55372b285849860b57ad7be0380606311c71d0d93d3ec06bd5",
+        ),
+        (
+            "alto-saxophone",
+            "7d68715da37acb553e9c4173273350c13eee5af3a37212b6c36592a56cf92c8c",
+            "9d5bf3ba6c28469be4e8f6fc86d5625571d2a7a3c4d3378a630df67800324ef1",
+        ),
+        (
+            "tenor-saxophone",
+            "0eeb9a6622517eeaffc9d968132c35958c1b4b735a0bde0dd599b024ef3628b1",
+            "4795ab2718b2efca92af7b292ded135e56fdd44e3137815ecf710904ba7b7463",
+        ),
+        (
+            "tuba",
+            "2d1fa39d3fb5b6c5f1eaeeb04624104a0aca6ab73a50eb706a7cc01c9ee34be4",
+            "88f75805ffa0140e1f8654502f28e6b66ec0f6fedb799c536a28b50ddce637c4",
+        ),
     ],
 )
-def test_fixup_output_is_byte_identical_to_original_table(tmp_path, instrument_id, expected_sha256):
-    # Hashes captured at e830fb8, before moving SOUNDS into instruments.json.
+@pytest.mark.parametrize(
+    "suspect_measures",
+    [pytest.param(["2"], id="marked"), pytest.param([], id="no-suspect-measures")],
+)
+def test_fixup_output_snapshot(
+    tmp_path, instrument_id, marked_sha256, unmarked_sha256, suspect_measures
+):
+    # Byte snapshots: marked hashes captured at e830fb8 before moving SOUNDS into
+    # instruments.json; unmarked hashes captured at d3c0a56 before ID validation.
+    # Change these only after reviewing the serialized MusicXML output.
+    expected_sha256 = marked_sha256 if suspect_measures else unmarked_sha256
     src = tmp_path / "omr.musicxml"
     src.write_text(omr_score(), encoding="utf-8")
     dst = tmp_path / "fixed.musicxml"
-    fix_instrument_file(src, dst, INSTRUMENTS[instrument_id], suspect_measures=["2"])
+    fix_instrument_file(src, dst, INSTRUMENTS[instrument_id], suspect_measures=suspect_measures)
     assert hashlib.sha256(dst.read_bytes()).hexdigest() == expected_sha256
 
 

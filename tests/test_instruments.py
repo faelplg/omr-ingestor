@@ -1,4 +1,6 @@
 import json
+import xml.etree.ElementTree as ET
+from importlib.resources import files
 
 import pytest
 
@@ -117,3 +119,39 @@ def test_midi_program_boundaries_are_valid(write_json, program):
 def test_malformed_file_fails_clearly(write_json, data, match):
     with pytest.raises(InstrumentsError, match=match):
         load_instruments(write_json(data, "instruments.json"))
+
+
+@pytest.mark.parametrize(
+    "sound",
+    [
+        "brass.trumpt",
+        "BRASS.TUBA",
+        "brass",
+        " brass.tuba",
+        "brass.tuba ",
+        "\tbrass.tuba",
+        "brass.tuba\n",
+        "\u00a0brass.tuba",
+        "",
+        "  ",
+        None,
+        57,
+    ],
+)
+def test_invalid_sound_id_names_instrument_and_bad_value(write_json, sound):
+    with pytest.raises(InstrumentsError) as exc:
+        load_instruments(write_json([entry(instrument_sound=sound)]))
+    message = str(exc.value)
+    assert "bb-trumpet" in message
+    assert repr(sound) in message
+    assert "instrument_sound" in message
+
+
+def test_accepts_every_vendored_sound_id(write_json):
+    sounds = ET.fromstring(files("omr_ingestor").joinpath("data/sounds.xml").read_bytes())
+    ids = [sound.attrib["id"] for sound in sounds.findall("sound")]
+    assert ids
+    assert len(ids) == len(set(ids))
+    data = [entry(id=f"instrument-{i}", instrument_sound=sound) for i, sound in enumerate(ids)]
+    table = load_instruments(write_json(data))
+    assert [instrument.instrument_sound for instrument in table] == ids
