@@ -81,6 +81,8 @@ score-wide or part-wide scope).
   acceptance to `null`. Fixup and conversion are skipped until review is renewed
   or the original identity is restored. Swaps with identical names and instruments
   still go undetected; manifest names are output labels, not identity evidence.
+  Legacy status files without `part_identities` retain ID-only matching for
+  existing corrections, including on repeated reruns.
 - `navigation_lyric`: lyric text resembling D.C., D.S., Fine, Fim, Coda or al Fine
   requires review, including when navigation directions already exist. Its detail
   also reports when the part has no navigation direction (words, symbols or sound
