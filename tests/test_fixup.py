@@ -1,3 +1,5 @@
+import hashlib
+import json
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -12,6 +14,7 @@ from omr_ingestor.fixup import (
 )
 from omr_ingestor.instruments import load_instruments
 from omr_ingestor.musicxml import MusicXMLError, parse_musicxml, read_musicxml
+from omr_ingestor.paths import INSTRUMENTS_PATH
 from tests.musicxml_builders import (
     Q,
     measure,
@@ -168,6 +171,37 @@ def test_fix_instrument_file_round_trip(tmp_path):
     root = read_musicxml(dst)
     assert root.findtext(".//transpose/chromatic") == "-2"
     assert root.findtext(".//rehearsal") == "?"
+
+
+@pytest.mark.parametrize(
+    ("instrument_id", "expected_sha256"),
+    [
+        ("bb-trumpet", "43c12b66e3457ee1b7fd212d10dbfbfc0a206e52078661ce93d2d93dabaaec33"),
+        ("trombone", "dfb03e3881532bdd393107d15c02a588a3e97808db5d72b9096f9071c19b5633"),
+        ("flute", "628dcfebc95e723124c61747475d1c949359713f41bb462fa3e8c6a0cefad2a4"),
+        ("alto-saxophone", "7d68715da37acb553e9c4173273350c13eee5af3a37212b6c36592a56cf92c8c"),
+        ("tenor-saxophone", "0eeb9a6622517eeaffc9d968132c35958c1b4b735a0bde0dd599b024ef3628b1"),
+        ("tuba", "2d1fa39d3fb5b6c5f1eaeeb04624104a0aca6ab73a50eb706a7cc01c9ee34be4"),
+    ],
+)
+def test_fixup_output_is_byte_identical_to_original_table(tmp_path, instrument_id, expected_sha256):
+    # Hashes captured at e830fb8, before moving SOUNDS into instruments.json.
+    src = tmp_path / "omr.musicxml"
+    src.write_text(omr_score(), encoding="utf-8")
+    dst = tmp_path / "fixed.musicxml"
+    fix_instrument_file(src, dst, INSTRUMENTS[instrument_id], suspect_measures=["2"])
+    assert hashlib.sha256(dst.read_bytes()).hexdigest() == expected_sha256
+
+
+def test_fixup_reads_sound_from_custom_instrument_table(write_json):
+    entry = json.loads(INSTRUMENTS_PATH.read_text(encoding="utf-8"))[0]
+    entry.update(id="custom-trumpet", instrument_sound="brass.trumpet.c", midi_program=60)
+    instrument = load_instruments(write_json([entry]))["custom-trumpet"]
+    root = parse_musicxml(omr_score())
+    fix_instrument(root, instrument)
+    sp = root.find("part-list/score-part")
+    assert sp.findtext("score-instrument/instrument-sound") == "brass.trumpet.c"
+    assert sp.findtext("midi-instrument/midi-program") == "60"
 
 
 def volta_part(*bodies: str) -> ET.Element:
