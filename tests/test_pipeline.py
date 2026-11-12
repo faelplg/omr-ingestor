@@ -757,12 +757,15 @@ def test_rerun_preserves_corrections_when_part_ids_change(setup, monkeypatch, re
     assert status.review_signals == ()
 
 
+@pytest.mark.parametrize("corrections", [{"P2": ("1",)}, {"P1": ("1",)}, {}])
 @pytest.mark.parametrize("replacement", ['"P3"', '"P1"', '""'])
-def test_duration_part_id_failure_leaves_context_and_status_file_unchanged(setup, replacement):
+def test_duration_part_id_failure_leaves_context_and_status_file_unchanged(
+    setup, replacement, corrections
+):
     configure_parts(setup, ["Trumpet 1", "Trumpet 2"])
     ctx = _prepare(setup.manifest, "0", setup.output)
     ctx.status = replace(
-        ctx.status, part_ids=("P1", "P2"), hand_corrected={"P2": ("1",)}, measures_read=2
+        ctx.status, part_ids=("P1", "P2"), hand_corrected=corrections, measures_read=2
     )
     setup.item_dir.mkdir(parents=True)
     write_status(ctx.status, ctx.paths.status)
@@ -777,3 +780,48 @@ def test_duration_part_id_failure_leaves_context_and_status_file_unchanged(setup
     assert ctx.status is before_status
     assert ctx.report is None
     assert ctx.paths.status.read_bytes() == before_bytes
+
+
+@pytest.mark.parametrize("corrections", [{}, {"P1": ("1",)}, (), None])
+def test_rerun_rejects_removal_of_unreviewed_part(setup, monkeypatch, corrections):
+    configure_parts(setup, ["Trumpet 1", "Trumpet 2"])
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [multipart_xml()])))
+    monkeypatch.setenv(MUSESCORE_ENV_VAR, str(fake_musescore(setup.bin, two_trumpet_mscx())))
+    assert setup.run() == 0
+    reviewed = replace(setup.status(), hand_corrected=corrections)
+    write_status(reviewed, setup.item_dir / "status.json")
+    xml = multipart_xml().replace('"P2"', '"P3"')
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [xml])))
+
+    assert setup.run() == 1
+
+    status = setup.status()
+    assert status.part_ids == ("P1", "P2")
+    assert status.hand_corrected == corrections
+    assert "part IDs do not match" in status.stage("durations").detail
+    assert status.measures_read is None
+    assert status.suspect_measures == ()
+    assert status.review_signals == ()
+
+
+def test_duration_allows_additional_part_and_preserves_unreviewed_identity(setup):
+    configure_parts(setup, ["Trumpet 1", "Trumpet 2", "Trumpet 3"])
+    ctx = _prepare(setup.manifest, "0", setup.output)
+    ctx.status = replace(ctx.status, part_ids=("P1", "P2"), hand_corrected={"P1": ("1",)})
+    setup.item_dir.mkdir(parents=True)
+    ctx.raw_musicxml = setup.item_dir / "rerun.musicxml"
+    ctx.raw_musicxml.write_text(
+        score(
+            {
+                pid: [measure(1, DEFAULT_ATTRS + note(4)), measure(2, note(4))]
+                for pid in ("P1", "P2", "P3")
+            }
+        )
+    )
+
+    _durations(ctx)
+
+    assert ctx.status.part_ids == ("P1", "P2", "P3")
+    assert ctx.status.hand_corrected == {"P1": ("1",)}
+    assert ctx.status.acceptance["P2"] is None
+    assert ctx.status.acceptance["P3"] is None

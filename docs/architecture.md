@@ -143,9 +143,11 @@ After a rerun confirms a single part, its list again yields boolean acceptance.
 Lists are never assigned to individual parts automatically.
 Rerun to populate `part_ids`, then replace the list with a mapping after reviewing
 each part to obtain per-part acceptance. Reruns preserve recorded corrections and
-stop before updating duration data if recorded part IDs no longer match the new
-score, keeping the previous review intact. The failure status retains the prior
-IDs and corrections without counts, suspects or signals from the rejected score.
+stop before updating duration data if any previously recorded part ID disappears,
+including unreviewed parts omitted from the correction mapping. Additions are
+allowed; removals or replacements are rejected, keeping the previous review
+intact. The failure status retains the prior IDs and corrections without counts,
+suspects or signals from the rejected score.
 When editing `status.json` directly, update the derived `acceptance` block too;
 the reader recomputes and validates it rather than trusting stale ratios.
 Before review, acceptance is unknown. This human metric is separate from stage

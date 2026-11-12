@@ -286,13 +286,15 @@ def _xsd(ctx: _Context) -> str:
 def _durations(ctx: _Context) -> str:
     root = read_musicxml(ctx.raw_musicxml)
     ids = tuple(part_ids(root))
+    if not set(ctx.status.part_ids or ()).issubset(ids):
+        raise StageError(
+            "recorded part IDs do not match the current score: prior parts are missing"
+        )
     signals = check_review_signals(
         root, ctx.status.expected_measures, len(ctx.parts) if ctx.parts is not None else 1
     )
     if isinstance(ctx.status.hand_corrected, dict) and (
-        len(ids) < 2
-        or not set(ctx.status.hand_corrected).issubset(ids)
-        or any(signal.code == "part_identity" for signal in signals)
+        len(ids) < 2 or any(signal.code == "part_identity" for signal in signals)
     ):
         raise StageError("recorded hand_corrected part IDs do not match the current score")
     report = check_durations(root)
