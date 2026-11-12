@@ -28,22 +28,6 @@ class FixupError(MusicXMLError):
     """Raised when the instrument cannot be applied to the part."""
 
 
-@dataclass(frozen=True, slots=True)
-class Sound:
-    instrument_sound: str  # MusicXML standard sound id (sounds.xml)
-    midi_program: int  # General MIDI program, 1-based as in MusicXML
-
-
-# instruments.json has no sound field yet, so the sound of each instrument lives here.
-SOUNDS: dict[str, Sound] = {
-    "bb-trumpet": Sound("brass.trumpet.bflat", 57),
-    "trombone": Sound("brass.trombone", 58),
-    "flute": Sound("wind.flutes.flute", 74),
-    "alto-saxophone": Sound("wind.reed.saxophone.alto", 66),
-    "tenor-saxophone": Sound("wind.reed.saxophone.tenor", 67),
-    "tuba": Sound("brass.tuba", 59),
-}
-
 CLEFS: dict[str, tuple[str, str]] = {"G2": ("G", "2"), "F4": ("F", "4")}
 
 DEFAULT_MARK = "?"
@@ -115,7 +99,6 @@ def _set_name_and_sound(
     score_part: ET.Element,
     part: ET.Element,
     instrument: Instrument,
-    sound: Sound,
     part_name: str | None = None,
 ) -> None:
     name = score_part.find("part-name")
@@ -138,11 +121,11 @@ def _set_name_and_sound(
 
     score_inst = ET.Element("score-instrument", id=inst_id)
     _sub(score_inst, "instrument-name", instrument.name_pt)
-    _sub(score_inst, "instrument-sound", sound.instrument_sound)
+    _sub(score_inst, "instrument-sound", instrument.instrument_sound)
     _insert_ordered(score_part, score_inst, _SCORE_PART_ORDER)
     midi = ET.Element("midi-instrument", id=inst_id)
     _sub(midi, "midi-channel", channel or "1")
-    _sub(midi, "midi-program", str(sound.midi_program))
+    _sub(midi, "midi-program", str(instrument.midi_program))
     _insert_ordered(score_part, midi, _SCORE_PART_ORDER)
 
     # Notes may point at score-instruments that were just removed.
@@ -493,10 +476,6 @@ def fix_instrument(
     part_name overrides the displayed part name, keeping the instrument sound/name.
     The page layout is removed from the whole score, since it is shared by all parts.
     """
-    try:
-        sound = SOUNDS[instrument.id]
-    except KeyError:
-        raise FixupError(f"no sound known for instrument {instrument.id!r}") from None
     if instrument.clef not in CLEFS:
         raise FixupError(f"clef {instrument.clef!r} is not one of {sorted(CLEFS)}")
     part = find_part(root, part_id)
@@ -514,7 +493,7 @@ def fix_instrument(
         )
     )
     _add_marks(part, marked, mark_text)
-    _set_name_and_sound(score_part, part, instrument, sound, part_name)
+    _set_name_and_sound(score_part, part, instrument, part_name)
     _set_clef_and_transpose(part, instrument)
     remove_page_layout(root)
     return FixupResult(tuple(rewrites), tuple(volta_suspects), marked)
