@@ -290,6 +290,15 @@ def test_count_review_is_independent_of_valid_durations(expected):
     assert not check_review_signals(root, 2)
 
 
+@pytest.mark.parametrize("part_id", [" ", " \t "])
+def test_whitespace_only_part_id_requires_identity_review(part_id):
+    root = ET.fromstring(score({part_id: [measure(1, DEFAULT_ATTRS + rest(4, measure=True))]}))
+    assert not check_durations(root).suspects
+    signals = check_review_signals(root, 1, 1)
+    assert [signal.code for signal in signals] == ["part_identity"]
+    assert signals[0].detail == "part IDs must be unique and match the score-part declarations"
+
+
 def test_part_count_and_structural_identity_review():
     root = ET.fromstring(
         score({f"P{i}": [measure(1, DEFAULT_ATTRS + rest(4, measure=True))] for i in range(6)})

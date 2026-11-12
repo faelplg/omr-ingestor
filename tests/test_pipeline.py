@@ -633,14 +633,15 @@ def test_score_wide_annotation_appears_once_with_duplicate_part_ids():
     assert not parts[1].findall("measure/direction")
 
 
-def test_duplicate_part_ids_stop_before_fixup_and_save_signal(setup, monkeypatch, capsys):
+@pytest.mark.parametrize("unsafe_id", ["P1", "   "], ids=["duplicate", "whitespace"])
+def test_unsafe_part_ids_stop_before_fixup_and_save_signal(setup, monkeypatch, capsys, unsafe_id):
     configure_parts(setup, ["Trumpet 1", "Trumpet 2"])
     xml = score(
         {
             pid: [measure(n, (DEFAULT_ATTRS if n == 1 else "") + note(4)) for n in range(1, 4)]
             for pid in ("P1", "P2")
         }
-    ).replace('id="P2"', 'id="P1"')
+    ).replace('id="P2"', f'id="{unsafe_id}"')
     monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [xml])))
 
     def forbidden_fixup(*args, **kwargs):

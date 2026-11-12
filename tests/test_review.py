@@ -289,6 +289,7 @@ def test_review_added_part_allows_changed_identity_replacement(item, capsys):
             "OMR P1", "Changed P1"
         )
     )
+    pending = read_status(path)
     capsys.readouterr()
     assert main(["review", str(item), "7", "--part", "P1", "--replace"]) == 0
     status = read_status(path)
@@ -304,6 +305,18 @@ def test_review_added_part_allows_changed_identity_replacement(item, capsys):
     assert status.acceptance["P3"] is None
     assert status.review_signals == ()
     assert "rerun to complete failed stages" in capsys.readouterr().err
+
+    # Review a new part while the status still has only the prior identities.
+    write_status(pending, path)
+    assert main(["review", str(item), "7", "--part", "P3"]) == 0
+    added = read_status(path)
+    assert added.hand_corrected == {**prior.hand_corrected, "P3": ("7",)}
+    assert added.part_identities["P3"] == PartIdentity("OMR P3")
+    assert added.acceptance["P3"].hand_corrected_count == 1
+    assert added.acceptance["P3"].ratio == 0.016667
+    assert added.acceptance["P3"].accepted is True
+    assert added.acceptance["P1"] is None
+    assert added.acceptance["P2"] == prior.acceptance["P2"]
 
 
 def test_review_missing_part_requires_archive_and_rerun(item, capsys):
