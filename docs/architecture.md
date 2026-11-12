@@ -93,14 +93,20 @@ counts remain in the stage detail, and batch reports the item as `not_counted`.
 [PR #27](https://github.com/faelplg/omr-ingestor/pull/27) introduced status schema 4:
 `review_signals` carry `code`, `detail`, `part_id` and `measure`, and
 `review_required` is true for review signals or duration/volta suspects. Part
-identity checks cover unique IDs and their declarations, not musical continuity
-or swapped voices. Navigation-like lyrics are review hints, including false
-positives for ordinary words. Count warnings are anchored at the part's first
+identity checks cover unique IDs and their declarations. Reruns also compare
+raw part metadata for recorded per-part reviews, as described below; this does
+not prove musical continuity. Navigation-like lyrics are review hints, including
+false positives for ordinary words. Count warnings are anchored at the part's first
 measure and cannot locate missing content. See the [README review signals](../README.md#review-signals)
 for the precise behavior and score annotations.
 
-Status schema 6 records `part_ids` (MusicXML IDs in score order). On a first run,
-they are unknown until the durations stage succeeds. A rerun retains the previous
+Status schema 7 retains `part_ids` (MusicXML IDs in score order, introduced in
+schema 6) and adds `part_identities`. The latter maps each ID to its raw
+`part_name` and `instruments` (the ordered list of `score-instrument/instrument-name`
+values). These are read from the score-part declarations before instrument fixup,
+so manifest names and configured instruments cannot hide a change. Missing names
+are stored as empty strings; absent score instruments yield an empty list.
+On a first run, IDs and identities are unknown until the durations stage succeeds. A rerun retains the previous
 IDs until that stage validates the new score; schemas 1-5 load with unknown IDs.
 The `text_removals` field,
 introduced by [PR #29](https://github.com/faelplg/omr-ingestor/pull/29) in schema 5,
@@ -142,12 +148,29 @@ are validated against the original item-wide calculation and normalized on load.
 After a rerun confirms a single part, its list again yields boolean acceptance.
 Lists are never assigned to individual parts automatically.
 Rerun to populate `part_ids`, then replace the list with a mapping after reviewing
-each part to obtain per-part acceptance. Reruns preserve recorded corrections and
-stop before updating duration data if any previously recorded part ID disappears,
-including unreviewed parts omitted from the correction mapping. Additions are
-allowed; removals or replacements are rejected, keeping the previous review
-intact. The failure status retains the prior IDs and corrections without counts,
-suspects or signals from the rejected score.
+each part to obtain per-part acceptance. For reviews with `part_identities`, a
+rerun compares each reviewed ID, raw part name and instrument-name list. A dropped
+or renumbered part, changed name or changed instrument stops the durations stage
+before fixup and conversion. The affected part gets a `part_identity` review
+signal explaining the recorded and current metadata and the need for source
+review again. Its acceptance becomes `null`, including for a previously empty
+correction list. Other reviewed parts retain their acceptance. The previous IDs,
+identities and corrections are preserved for inspection; repeating the rerun
+cannot silently bind them to the new metadata. Counts and suspects from the
+rejected score are not published.
+
+Schemas 1-6 load with `part_identities: null`. Existing corrections without
+identity metadata keep ID-only behavior on reruns, even after being saved as
+schema 7; metadata is never retroactively attached to an old review. Such records
+cannot detect reused IDs after voice swaps or renumbering. To establish a fresh
+identity-backed review, archive the previous status file, rerun to capture raw
+identities, then record the per-part corrections after comparing with the source.
+Use the same fresh-review workflow after an intentional identity change.
+
+All reruns also stop if any previously recorded ID disappears, including
+unreviewed parts omitted from the mapping. Additions are allowed. For legacy
+ID-only failures, the status retains the prior review without counts, suspects
+or signals from the rejected score.
 When editing `status.json` directly, update the derived `acceptance` block too;
 the reader recomputes and validates it rather than trusting stale ratios.
 Before review, acceptance is unknown. This human metric is separate from stage
