@@ -1,8 +1,8 @@
 [
-  {"id": "bb-trumpet", "name_pt": "Trompete em Sib", "clef": "G2", "transpose": {"diatonic": -1, "chromatic": -2, "octave_change": 0}, "source": "OMR study"},
-  {"id": "trombone", "name_pt": "Trombone (Dó)", "clef": "F4", "transpose": {"diatonic": 0, "chromatic": 0, "octave_change": 0}, "source": "OMR study"},
-  {"id": "flute", "name_pt": "Flauta (Dó)", "clef": "G2", "transpose": {"diatonic": 0, "chromatic": 0, "octave_change": 0}, "source": "OMR study"},
-  {"id": "alto-saxophone", "name_pt": "Sax alto em Mib", "clef": "G2", "transpose": {"diatonic": -5, "chromatic": -9, "octave_change": 0}, "source": "OMR study"},
-  {"id": "tenor-saxophone", "name_pt": "Sax tenor em Sib", "clef": "G2", "transpose": {"diatonic": -1, "chromatic": -2, "octave_change": -1}, "source": "OMR study"},
-  {"id": "tuba", "name_pt": "Tuba (Dó)", "clef": "F4", "transpose": {"diatonic": 0, "chromatic": 0, "octave_change": 0}, "source": "OMR study"}
+  {"id": "bb-trumpet", "name_pt": "Trompete em Sib", "clef": "G2", "transpose": {"diatonic": -1, "chromatic": -2, "octave_change": 0}, "instrument_sound": "brass.trumpet.bflat", "midi_program": 57, "source": "OMR study"},
+  {"id": "trombone", "name_pt": "Trombone (Dó)", "clef": "F4", "transpose": {"diatonic": 0, "chromatic": 0, "octave_change": 0}, "instrument_sound": "brass.trombone", "midi_program": 58, "source": "OMR study"},
+  {"id": "flute", "name_pt": "Flauta (Dó)", "clef": "G2", "transpose": {"diatonic": 0, "chromatic": 0, "octave_change": 0}, "instrument_sound": "wind.flutes.flute", "midi_program": 74, "source": "OMR study"},
+  {"id": "alto-saxophone", "name_pt": "Sax alto em Mib", "clef": "G2", "transpose": {"diatonic": -5, "chromatic": -9, "octave_change": 0}, "instrument_sound": "wind.reed.saxophone.alto", "midi_program": 66, "source": "OMR study"},
+  {"id": "tenor-saxophone", "name_pt": "Sax tenor em Sib", "clef": "G2", "transpose": {"diatonic": -1, "chromatic": -2, "octave_change": -1}, "instrument_sound": "wind.reed.saxophone.tenor", "midi_program": 67, "source": "OMR study"},
+  {"id": "tuba", "name_pt": "Tuba (Dó)", "clef": "F4", "transpose": {"diatonic": 0, "chromatic": 0, "octave_change": 0}, "instrument_sound": "brass.tuba", "midi_program": 59, "source": "OMR study"}
 ]

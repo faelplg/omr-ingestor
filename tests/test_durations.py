@@ -83,12 +83,57 @@ def test_pickup_and_closing_measure():
     assert report.suspects == []
 
 
-def test_first_measure_short_without_implicit_is_a_pickup():
-    assert not suspects(measure(1, DEFAULT_ATTRS + Q), measure(2, Q * 4))
+@pytest.mark.parametrize("attrs", ["", ' implicit="no"'])
+def test_first_measure_short_without_pickup_evidence_is_suspect(tmp_path, attrs):
+    path = tmp_path / "short-first.musicxml"
+    path.write_text(
+        score({"P1": [measure(1, DEFAULT_ATTRS + Q, attrs=attrs), measure(2, Q * 4)]}),
+        encoding="utf-8",
+    )
+    report = measure_durations(path)
+    assert report.suspect_numbers("P1") == ["1"]
+    assert not report.measures[0].partial
+
+
+def test_implicit_pickup_without_completing_last_measure():
+    report = check(measure(0, DEFAULT_ATTRS + Q, attrs=' implicit="yes"'), measure(1, Q * 4))
+    assert report.measures[0].partial
+    assert report.suspects == []
+
+
+def test_pickup_without_implicit_with_completing_last_measure():
+    report = check(measure(0, DEFAULT_ATTRS + Q), measure(1, Q * 4), measure(2, Q * 3))
+    assert [m.partial for m in report.measures] == [True, False, True]
+    assert report.suspects == []
 
 
 def test_closing_measure_must_complete_the_pickup():
-    assert suspects(measure(0, DEFAULT_ATTRS + Q), measure(1, Q * 4), measure(2, Q * 2)) == ["2"]
+    assert suspects(measure(0, DEFAULT_ATTRS + Q), measure(1, Q * 4), measure(2, Q * 2)) == [
+        "0",
+        "2",
+    ]
+
+
+def test_completing_pickup_requires_matching_time_signatures():
+    three_four = "<attributes><time><beats>3</beats><beat-type>4</beat-type></time></attributes>"
+    assert suspects(measure(0, DEFAULT_ATTRS + Q), measure(1, three_four + Q * 2)) == [
+        "0",
+        "1",
+    ]
+
+
+def test_single_short_measure_without_implicit_is_suspect():
+    assert suspects(measure(1, DEFAULT_ATTRS + Q * 2)) == ["1"]
+
+
+def test_implicit_mid_piece_measure_is_still_partial():
+    report = check(
+        measure(1, DEFAULT_ATTRS + Q * 4),
+        measure(2, Q, attrs=' implicit="yes"'),
+        measure(3, Q * 4),
+    )
+    assert [m.partial for m in report.measures] == [False, True, False]
+    assert report.suspects == []
 
 
 def test_pickup_longer_than_the_bar_is_suspect():

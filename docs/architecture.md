@@ -50,8 +50,11 @@ flowchart TB
    multiple movements are rejected. An exit code alone does not decide success.
 2. **XSD.** Validates the raw MusicXML against the local MusicXML 4.0 XSD using
    `xmllint`. A failed stage stops the item and skips subsequent stages.
-3. **Duration and review checks.** Checks per-measure duration, allowing pickups
-   and supported implicit/split bars. A `<multiple-rest>` start is suspect even
+3. **Duration and review checks.** Checks per-measure duration. A short first
+   measure is accepted as a pickup only with `implicit="yes"` or a short last
+   measure under the same time signature whose duration completes the bar with
+   it. Otherwise it remains a duration suspect. Supported implicit/split bars
+   remain accepted. A `<multiple-rest>` start is suspect even
    when its duration adds up; missing rest content is not reconstructed. Records
    each part's measure count against `expected_measures`. Independently records
    `measure_count_mismatch`, `part_count_mismatch`, `part_identity` and

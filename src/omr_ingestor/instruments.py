@@ -29,6 +29,8 @@ class Instrument:
     name_pt: str
     clef: str
     transpose: Transpose
+    instrument_sound: str  # MusicXML sound id from sounds.xml
+    midi_program: int  # General MIDI program, 1-based as in MusicXML
     source: str
 
 
@@ -60,11 +62,19 @@ def _parse_instrument(raw: Any, where: str) -> Instrument:
     clef = _expect(obj["clef"], str, f"{where}.clef")
     if clef not in VALID_CLEFS:
         raise InstrumentsError(f"{where}.clef: {clef!r} is not one of {sorted(VALID_CLEFS)}")
+    instrument_sound = _expect(obj["instrument_sound"], str, f"{where}.instrument_sound")
+    if not instrument_sound.strip():
+        raise InstrumentsError(f"{where}.instrument_sound: expected a non-empty sound id")
+    midi_program = _expect(obj["midi_program"], int, f"{where}.midi_program")
+    if not 1 <= midi_program <= 128:
+        raise InstrumentsError(f"{where}.midi_program: expected an integer from 1 to 128")
     return Instrument(
         id=_expect(obj["id"], str, f"{where}.id"),
         name_pt=_expect(obj["name_pt"], str, f"{where}.name_pt"),
         clef=clef,
         transpose=Transpose(**{k: _expect(tr[k], int, f"{where}.transpose.{k}") for k in tr}),
+        instrument_sound=instrument_sound,
+        midi_program=midi_program,
         source=_expect(obj["source"], str, f"{where}.source"),
     )
 

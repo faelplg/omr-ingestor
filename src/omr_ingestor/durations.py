@@ -216,22 +216,23 @@ def _mark_partial(
     implicit = measures[i].get("implicit") == "yes"
     nxt = results[i + 1] if i + 1 < len(results) else None
     first = results[0]
+    last = results[-1]
+    completing_pickup = (
+        len(results) > 1
+        and _is_short(first)
+        and _is_short(last)
+        and first.time == last.time
+        and first.actual + last.actual == first.time.quarters
+    )
     partial = (
-        i == 0
-        or implicit
+        implicit
+        # A completing last measure is evidence for an unmarked pickup too.
+        or (i in (0, len(results) - 1) and completing_pickup)
         # First half of a bar split by an implicit measure (e.g. at a repeat sign).
         or (
             nxt is not None
             and measures[i + 1].get("implicit") == "yes"
             and m.actual + nxt.actual == m.time.quarters
-        )
-        # Last measure completing the pickup.
-        or (
-            nxt is None
-            and i > 0
-            and _is_short(first)
-            and first.time == m.time
-            and m.actual + first.actual == m.time.quarters
         )
     )
     return replace(m, partial=partial) if partial else m
@@ -247,9 +248,10 @@ def check_durations(root: ET.Element) -> DurationReport:
 def measure_durations(path: Path) -> DurationReport:
     """Check every measure of every part of a MusicXML file against its time signature.
 
-    A measure shorter than the time signature is accepted when it is the first measure
-    (pickup), is marked implicit="yes", is the first half of a bar split by an implicit
-    measure, or is the last measure and completes the pickup.
+    A short first measure is accepted as a pickup only when marked implicit="yes"
+    or paired with a completing last measure under the same time signature. Other
+    short measures are accepted when marked implicit="yes", when they are the first
+    half of a bar split by an implicit measure, or when they complete the pickup.
     """
     return check_durations(read_musicxml(path))
 

@@ -15,6 +15,17 @@ Every stage of `docs/architecture.md` is implemented, per item (`run`) and over 
 - [Known accuracy limits](docs/accuracy.md): what review signals catch, tested
   Audiveris mitigations, and the <=5% hand-correction acceptance criterion.
 
+## Instrument sounds
+
+`instruments.json` defines each instrument's `instrument_sound` (MusicXML sound
+ID) and `midi_program` (General MIDI program, 1-based, from 1 to 128). Both fields
+are required. Fixup reads them directly from the instrument entry.
+
+All six sound IDs were checked against the W3C MusicXML
+[`sounds.xml`](https://github.com/w3c/musicxml/blob/gh-pages/schema/sounds.xml)
+on 2026-11-12. The sound IDs and MIDI programs are carried over unchanged from
+the original fixup table, preserving the existing MusicXML output.
+
 ## Usage
 
 Install with `uv sync`. The tools come from environment variables: `OMR_AUDIVERIS`, `OMR_MUSESCORE` and `OMR_MUSICXML_XSD` (the local MusicXML 4.0 XSD); `xmllint` must be on the `PATH`.
