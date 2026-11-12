@@ -15,7 +15,7 @@ from dataclasses import dataclass, replace
 from fractions import Fraction
 from pathlib import Path
 
-from omr_ingestor.musicxml import MusicXMLError, read_musicxml
+from omr_ingestor.musicxml import MusicXMLError, has_safe_part_ids, read_musicxml
 from omr_ingestor.navigation import NAVIGATION_PATTERN, NAVIGATION_SOUND_ATTRIBUTES
 
 
@@ -293,14 +293,7 @@ def check_review_signals(
                 "part_count_mismatch", f"{len(parts)} part(s) read, {expected_parts} expected"
             )
         )
-    ids = [part.get("id", "") for part in parts]
-    declared = [part.get("id", "") for part in root.findall("part-list/score-part")]
-    if (
-        not all(ids)
-        or len(set(ids)) != len(ids)
-        or len(set(declared)) != len(declared)
-        or set(ids) != set(declared)
-    ):
+    if not has_safe_part_ids(root):
         signals.append(
             ReviewSignal(
                 "part_identity", "part IDs must be unique and match the score-part declarations"

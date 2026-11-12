@@ -31,8 +31,9 @@ uv run omr-ingestor review output/song-duet 7 12a --part P1 --replace
 This records the current raw identity for that part, clears only its
 `part_identity_changed` signal, and recomputes the entire acceptance block,
 including `null` for unreviewed parts. Other review signals remain. Rerun the
-pipeline to complete stages that stopped on the identity change. Missing or
-reordered prior IDs still require a rerun before recording corrections.
+pipeline to complete stages that stopped on the identity change. Added parts
+are allowed and remain unreviewed. If prior IDs are missing, archive the previous
+status file and rerun before recording fresh source-backed reviews.
 Alternatively, restoring the original score clears the change signal and
 restores acceptance on a successful rerun.
 
@@ -42,18 +43,18 @@ command preserves that provenance when other parts still have legacy reviews.
 Archive the prior status and rerun before recording fresh source-backed reviews
 for all parts to enable metadata checking.
 
-A multipart item's old shared list keeps its
-original item-wide ratio, including after rerunning, but `accepted` is `null`.
-A <=5% shared ratio does not establish per-part acceptance. The batch JSON marks
-its `acceptance_scope` as `legacy_item_wide`, and the terminal summary identifies
-it as legacy item-wide with per-part acceptance unknown. After source review,
-use `review output/<item> --part P1 --replace` to replace the shared list with a
-review for P1, then record each remaining part separately. This
-explicit replacement discards the shared list; it is never assigned to a part
-automatically. Flat lists with unknown part IDs also have unknown acceptance until a rerun establishes their
-part identity; a confirmed single part retains boolean acceptance and has no
-shared label in the terminal summary. See [Architecture](architecture.md) for the
-status fields and migration workflow.
+A multipart item's old shared list keeps its original item-wide ratio,
+including after rerunning, but `accepted` is `null`. A <=5% shared ratio does
+not establish per-part acceptance. The batch JSON marks its `acceptance_scope`
+as `legacy_item_wide`, and the terminal summary identifies it as legacy
+item-wide with per-part acceptance unknown. After source review, use
+`review output/<item> --part P1 --replace` to replace the shared list with a
+review for P1, then record each remaining part separately. This explicit
+replacement discards the shared list; it is never assigned to a part
+automatically. Flat lists with unknown part IDs also have unknown acceptance
+until a rerun establishes their part identity; a confirmed single part retains
+boolean acceptance and has no shared label in the terminal summary. See
+[Architecture](architecture.md) for the status fields and migration workflow.
 
 Use `review output/<item> 7 12a` for a single-part item, or add `--part P1`
 for a multipart item. Without `--replace`, the command adds measures; duplicate

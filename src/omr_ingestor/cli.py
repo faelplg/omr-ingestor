@@ -191,14 +191,20 @@ def main(argv: list[str] | None = None) -> int:
             _print_run(result)
             return 0 if result.ok else 1
         elif args.command == "review":
-            result = record_review(
-                args.item_dir,
-                args.measures,
-                part_id=args.part,
-                replace_existing=args.replace,
-                dry_run=args.dry_run,
-            )
+            try:
+                result = record_review(
+                    args.item_dir,
+                    args.measures,
+                    part_id=args.part,
+                    replace_existing=args.replace,
+                    dry_run=args.dry_run,
+                )
+            except (StatusError, MusicXMLError, OSError) as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 1
             print(dumps_status(result), end="")
+            if args.replace and any(stage.status is StageState.FAILED for stage in result.stages):
+                print("hint: rerun to complete failed stages", file=sys.stderr)
         elif args.command == "batch":
             result = run_batch(args.manifest, args.output, on_item=_print_item)
             _print_batch(result)
@@ -210,14 +216,7 @@ def main(argv: list[str] | None = None) -> int:
                     f"{inst.id}\t{inst.clef}\t"
                     f"diatonic={t.diatonic} chromatic={t.chromatic} octave={t.octave_change}"
                 )
-    except (
-        ManifestError,
-        InstrumentsError,
-        PipelineSetupError,
-        StatusError,
-        MusicXMLError,
-        OSError,
-    ) as exc:
+    except (ManifestError, InstrumentsError, PipelineSetupError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     return 0

@@ -7,7 +7,14 @@ import pytest
 
 from omr_ingestor.cli import main
 from omr_ingestor.durations import ReviewSignal
-from omr_ingestor.status import ItemStatus, PartIdentity, read_status, write_status
+from omr_ingestor.status import (
+    ItemStatus,
+    PartIdentity,
+    Stage,
+    StageState,
+    read_status,
+    write_status,
+)
 from tests.musicxml_builders import measure, score
 
 
@@ -59,7 +66,7 @@ def test_review_multipart_keeps_unreviewed_null(item):
     assert status.hand_corrected == {"P1": ("7",)}
     assert status.acceptance["P1"].ratio == 0.016667
     assert status.acceptance["P2"] is None
-    assert main(["review", str(item), "--part", "P2"]) == 0
+    assert main(["review", str(item), "--part", "P2", "--replace"]) == 0
     status = read_status(item / "status.json")
     assert status.hand_corrected == {"P1": ("7",), "P2": ()}
     assert status.acceptance["P2"].accepted is True
@@ -69,9 +76,9 @@ def test_review_multipart_keeps_unreviewed_null(item):
     ("args", "error"),
     [
         (["--part", "missing"], "unknown part"),
-        (["99"], "invalid measure"),
-        (["7", "7"], "duplicate measure"),
-        ([""], "invalid measure"),
+        (["99"], "measure '99' not found in part P1 of"),
+        (["7", "7"], "duplicate measure numbers in review: ['7']"),
+        ([""], "measure '' not found in part P1 of"),
     ],
 )
 def test_review_rejects_invalid_input_without_writing(item, capsys, args, error):
@@ -173,7 +180,7 @@ def test_review_preserves_legacy_provenance_for_other_parts(item):
 
 
 @pytest.mark.parametrize("failure", ["missing", "multiple", "duplicate_ids", "invalid_status"])
-def test_review_rejects_unsafe_artifacts(item, failure):
+def test_review_rejects_unsafe_artifacts(item, failure, capsys):
     raw = next((item / "audiveris").rglob("*.musicxml"))
     if failure == "missing":
         raw.unlink()
@@ -181,7 +188,9 @@ def test_review_rejects_unsafe_artifacts(item, failure):
         raw.with_name("other.musicxml").write_bytes(raw.read_bytes())
     elif failure == "duplicate_ids":
         raw.write_text(
-            score({"P1": []}).replace("</score-partwise>", '<part id="P1"/></score-partwise>')
+            score({"P1": [measure("7", "")]}).replace(
+                "</score-partwise>", '<part id="P1"/></score-partwise>'
+            )
         )
     else:
         data = json.loads((item / "status.json").read_text())
@@ -189,6 +198,14 @@ def test_review_rejects_unsafe_artifacts(item, failure):
         (item / "status.json").write_text(json.dumps(data))
     before = snapshot(item)
     assert main(["review", str(item), "7"]) == 1
+    error = capsys.readouterr().err
+    expected = {
+        "missing": "expected one raw Audiveris MusicXML, found 0",
+        "multiple": "expected one raw Audiveris MusicXML, found 2",
+        "duplicate_ids": f"{raw}: unsafe part identity",
+        "invalid_status": "does not match hand_corrected",
+    }
+    assert expected[failure] in error
     assert snapshot(item) == before
 
 
@@ -229,3 +246,95 @@ def test_review_write_failure_preserves_status(item, monkeypatch, capsys):
     assert main(["review", str(item), "7"]) == 1
     assert "atomic replacement failure" in capsys.readouterr().err
     assert snapshot(item) == before
+
+
+def test_review_rejects_missing_recorded_measure(item, capsys):
+    path = item / "status.json"
+    write_status(replace(read_status(path), hand_corrected=("99",)), path)
+    before = snapshot(item)
+    assert main(["review", str(item), "7"]) == 1
+    assert "prior measure '99' is absent or ambiguous" in capsys.readouterr().err
+    assert snapshot(item) == before
+
+
+@pytest.mark.parametrize("multi", [False, True])
+def test_review_empty_requires_explicit_replacement(item, multi, capsys):
+    if multi:
+        multipart(item)
+    before = snapshot(item)
+    assert main(["review", str(item), "--part", "P1"]) == 1
+    assert "no measures given; use --replace to record a review with no corrections" in (
+        capsys.readouterr().err
+    )
+    assert snapshot(item) == before
+
+
+def test_review_added_part_allows_changed_identity_replacement(item, capsys):
+    multipart(item)
+    assert main(["review", str(item), "7", "--part", "P1"]) == 0
+    assert main(["review", str(item), "12a", "--part", "P2"]) == 0
+    path = item / "status.json"
+    prior = read_status(path)
+    write_status(
+        replace(
+            prior,
+            review_signals=(ReviewSignal("part_identity_changed", "changed", part_id="P1"),),
+            stages=(Stage("durations", StageState.FAILED, detail="part identity changed"),),
+        ),
+        path,
+    )
+    raw = next((item / "audiveris").rglob("*.musicxml"))
+    raw.write_text(
+        score({pid: [measure("7", ""), measure("12a", "")] for pid in ("P1", "P2", "P3")}).replace(
+            "OMR P1", "Changed P1"
+        )
+    )
+    capsys.readouterr()
+    assert main(["review", str(item), "7", "--part", "P1", "--replace"]) == 0
+    status = read_status(path)
+    assert status.part_ids == ("P1", "P2", "P3")
+    assert status.part_identities == {
+        "P1": PartIdentity("Changed P1"),
+        "P2": PartIdentity("OMR P2"),
+        "P3": PartIdentity("OMR P3"),
+    }
+    assert status.hand_corrected == prior.hand_corrected
+    assert status.acceptance["P1"].accepted
+    assert status.acceptance["P2"] == prior.acceptance["P2"]
+    assert status.acceptance["P3"] is None
+    assert status.review_signals == ()
+    assert "rerun to complete failed stages" in capsys.readouterr().err
+
+
+def test_review_missing_part_requires_archive_and_rerun(item, capsys):
+    multipart(item)
+    assert main(["review", str(item), "7", "--part", "P1"]) == 0
+    raw = next((item / "audiveris").rglob("*.musicxml"))
+    raw.write_text(score({"P1": [measure("7", "")]}))
+    capsys.readouterr()
+    before = snapshot(item)
+    assert main(["review", str(item), "7", "--part", "P1", "--replace"]) == 1
+    assert "archive status.json and rerun" in capsys.readouterr().err
+    assert snapshot(item) == before
+
+
+@pytest.mark.parametrize("command", ["run", "batch", "validate", "instruments"])
+def test_review_error_handling_does_not_hide_other_command_errors(monkeypatch, command):
+    def fail(*args, **kwargs):
+        raise OSError("synthetic unrelated command failure")
+
+    entry = {
+        "run": "run_item",
+        "batch": "run_batch",
+        "validate": "load_manifest",
+        "instruments": "load_instruments",
+    }
+    monkeypatch.setattr(f"omr_ingestor.cli.{entry[command]}", fail)
+    args = {
+        "run": ["music.json", "0", "-o", "output"],
+        "batch": ["music.json", "-o", "output"],
+        "validate": ["music.json"],
+        "instruments": [],
+    }
+    with pytest.raises(OSError, match="unrelated command failure"):
+        main([command, *args[command]])

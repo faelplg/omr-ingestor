@@ -43,6 +43,7 @@ from omr_ingestor.manifest import ManifestError, load_manifest
 from omr_ingestor.mscx_check import A5_LANDSCAPE, MM_PER_INCH, MscxCheckError, PageSize
 from omr_ingestor.musescore import MuseScoreError, resolve_musescore
 from omr_ingestor.musicxml import MusicXMLError, part_ids, read_musicxml, write_musicxml
+from omr_ingestor.part_identity import raw_part_identities
 from omr_ingestor.status import (
     STAGE_NAMES,
     ItemStatus,
@@ -295,16 +296,7 @@ def _describe_part_identity(identity: PartIdentity | None) -> str:
 def _durations(ctx: _Context) -> str:
     root = read_musicxml(ctx.raw_musicxml)
     ids = tuple(part_ids(root))
-    identities = {
-        part.get("id", ""): PartIdentity(
-            part_name=part.findtext("part-name") or "",
-            instruments=tuple(
-                instrument.findtext("instrument-name") or ""
-                for instrument in part.findall("score-instrument")
-            ),
-        )
-        for part in root.findall("part-list/score-part")
-    }
+    identities = raw_part_identities(root)
     if isinstance(ctx.status.hand_corrected, dict) and ctx.status.part_identities is not None:
         mismatches = tuple(
             ReviewSignal(

@@ -49,6 +49,18 @@ def part_ids(root: ET.Element) -> list[str]:
     return [part.get("id", "") for part in root.findall("part")]
 
 
+def has_safe_part_ids(root: ET.Element) -> bool:
+    """Require each ID to be nonempty, unique and declared exactly once."""
+    ids = part_ids(root)
+    declared = [part.get("id", "") for part in root.findall("part-list/score-part")]
+    return (
+        all(pid.strip() for pid in ids)
+        and len(set(ids)) == len(ids)
+        and len(set(declared)) == len(declared)
+        and set(ids) == set(declared)
+    )
+
+
 def find_part(root: ET.Element, part_id: str | None) -> ET.Element:
     """Return the <part> with this id; with part_id=None the score must have exactly one part."""
     parts = root.findall("part")

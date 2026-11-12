@@ -1,10 +1,12 @@
 """Record source-backed hand corrections without changing score files."""
 
+from collections import Counter
 from dataclasses import replace
 from pathlib import Path
 
-from omr_ingestor.musicxml import part_ids, read_musicxml
-from omr_ingestor.status import ItemStatus, PartIdentity, StatusError, read_status, write_status
+from omr_ingestor.musicxml import has_safe_part_ids, part_ids, read_musicxml
+from omr_ingestor.part_identity import raw_part_identities
+from omr_ingestor.status import ItemStatus, StatusError, read_status, write_status
 
 
 def record_review(
@@ -23,42 +25,34 @@ def record_review(
         raise StatusError(f"{item_dir}: expected one raw Audiveris MusicXML, found {len(files)}")
     root = read_musicxml(files[0])
     ids = tuple(part_ids(root))
-    declarations = root.findall("part-list/score-part")
-    declared_ids = [part.get("id", "") for part in declarations]
-    if (
-        not ids
-        or any(not pid.strip() for pid in ids)
-        or len(set(ids)) != len(ids)
-        or len(set(declared_ids)) != len(declared_ids)
-        or set(declared_ids) != set(ids)
-    ):
-        raise StatusError("unsafe part identity: IDs must be unique and match declarations")
-    if status.part_ids is not None and status.part_ids != ids:
-        raise StatusError("recorded part IDs differ from the raw score; rerun before reviewing")
+    if not ids or not has_safe_part_ids(root):
+        raise StatusError(
+            f"{files[0]}: unsafe part identity: IDs must be unique and match declarations"
+        )
+    if not set(status.part_ids or ()).issubset(ids):
+        raise StatusError(
+            "recorded part IDs are missing from the raw score; archive status.json and rerun "
+            "before recording a fresh review"
+        )
     if part_id is None:
         if len(ids) != 1:
             raise StatusError(f"multipart item requires --part; known parts: {list(ids)}")
         part_id = ids[0]
     if part_id not in ids:
         raise StatusError(f"unknown part {part_id!r}; known parts: {list(ids)}")
-    if len(set(measures)) != len(measures):
-        raise StatusError("duplicate measure numbers in review")
+    if not measures and not replace_existing:
+        raise StatusError("no measures given; use --replace to record a review with no corrections")
+    duplicates = [number for number, count in Counter(measures).items() if count > 1]
+    if duplicates:
+        raise StatusError(f"duplicate measure numbers in review: {duplicates}")
     part = next(p for p in root.findall("part") if p.get("id") == part_id)
     numbers = [m.get("number", "") for m in part.findall("measure")]
     for number in measures:
         if not number.strip() or number not in numbers:
-            raise StatusError(f"part {part_id}: invalid measure {number!r}")
+            raise StatusError(f"measure {number!r} not found in part {part_id} of {files[0]}")
         if numbers.count(number) != 1:
             raise StatusError(f"part {part_id}: ambiguous duplicate measure {number!r} in score")
-    identities = {
-        p.get("id", ""): PartIdentity(
-            part_name=p.findtext("part-name") or "",
-            instruments=tuple(
-                i.findtext("instrument-name") or "" for i in p.findall("score-instrument")
-            ),
-        )
-        for p in declarations
-    }
+    identities = raw_part_identities(root)
     prior = status.hand_corrected
     if len(ids) > 1 and isinstance(prior, tuple):
         if not replace_existing:
@@ -67,26 +61,30 @@ def record_review(
     existing = prior.get(part_id, ()) if isinstance(prior, dict) else prior or ()
     identity_changed = (
         status.part_identities is not None
+        and part_id in status.part_identities
         and status.part_identities[part_id] != identities[part_id]
     ) or any(
         s.code == "part_identity_changed" and s.part_id == part_id for s in status.review_signals
     )
     if identity_changed and not replace_existing:
         raise StatusError(f"part {part_id}: identity changed; review again and use --replace")
-    if not replace_existing and set(existing).intersection(measures):
-        raise StatusError("duplicate measure numbers already recorded; use --replace")
+    duplicates = sorted(set(existing).intersection(measures))
+    if not replace_existing and duplicates:
+        raise StatusError(
+            f"duplicate measure numbers already recorded: {duplicates}; use --replace"
+        )
     corrected = tuple(measures) if replace_existing else (*existing, *measures)
     for number in corrected:
         if numbers.count(number) != 1:
             raise StatusError(f"part {part_id}: prior measure {number!r} is absent or ambiguous")
     hand = {**(prior if isinstance(prior, dict) else {}), part_id: corrected}
-    # Preserve legacy ID-only provenance for reviews of other parts.
+    # Preserve legacy ID-only provenance for reviews that have not been replaced.
     if status.part_identities is None and (
         any(pid != part_id for pid in hand) or (prior is not None and not replace_existing)
     ):
         recorded_identities = None
     else:
-        recorded_identities = dict(status.part_identities or identities)
+        recorded_identities = {**identities, **(status.part_identities or {})}
         recorded_identities[part_id] = identities[part_id]
     updated = replace(
         status,
