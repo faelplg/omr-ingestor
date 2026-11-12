@@ -1,11 +1,22 @@
 """Typed loader for instruments.json."""
 
 import json
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, fields
+from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
 from omr_ingestor.paths import INSTRUMENTS_PATH
+
+
+def _load_sound_ids() -> frozenset[str]:
+    # sounds.xml ships inside the wheel, unlike the external instruments.json.
+    sounds = ET.fromstring(files("omr_ingestor").joinpath("data/sounds.xml").read_bytes())
+    return frozenset(sound.attrib["id"] for sound in sounds.findall("sound"))
+
+
+VALID_SOUND_IDS = _load_sound_ids()
 
 VALID_CLEFS = frozenset({"G2", "F4"})
 
@@ -62,14 +73,24 @@ def _parse_instrument(raw: Any, where: str) -> Instrument:
     clef = _expect(obj["clef"], str, f"{where}.clef")
     if clef not in VALID_CLEFS:
         raise InstrumentsError(f"{where}.clef: {clef!r} is not one of {sorted(VALID_CLEFS)}")
-    instrument_sound = _expect(obj["instrument_sound"], str, f"{where}.instrument_sound")
+    instrument_id = _expect(obj["id"], str, f"{where}.id")
+    sound_where = f"{where}.instrument_sound (instrument {instrument_id!r})"
+    instrument_sound = _expect(obj["instrument_sound"], str, sound_where)
     if not instrument_sound.strip():
-        raise InstrumentsError(f"{where}.instrument_sound: expected a non-empty sound id")
+        raise InstrumentsError(
+            f"{sound_where}: expected a non-empty sound id, got {instrument_sound!r}"
+        )
+    if instrument_sound != instrument_sound.strip():
+        raise InstrumentsError(
+            f"{sound_where}: leading/trailing whitespace in sound id {instrument_sound!r}"
+        )
+    if instrument_sound not in VALID_SOUND_IDS:
+        raise InstrumentsError(f"{sound_where}: unknown MusicXML sound id {instrument_sound!r}")
     midi_program = _expect(obj["midi_program"], int, f"{where}.midi_program")
     if not 1 <= midi_program <= 128:
         raise InstrumentsError(f"{where}.midi_program: expected an integer from 1 to 128")
     return Instrument(
-        id=_expect(obj["id"], str, f"{where}.id"),
+        id=instrument_id,
         name_pt=_expect(obj["name_pt"], str, f"{where}.name_pt"),
         clef=clef,
         transpose=Transpose(**{k: _expect(tr[k], int, f"{where}.transpose.{k}") for k in tr}),
