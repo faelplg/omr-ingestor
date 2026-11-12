@@ -158,7 +158,8 @@ or renumbered part, changed name or changed instrument stops the durations stage
 before fixup and conversion. The affected part gets a `part_identity_changed`
 review signal explaining the recorded and current metadata and the need for source
 review again. Its acceptance becomes `null`, including for a previously empty
-correction list. Other reviewed parts retain their acceptance. The previous IDs,
+correction list. For single-part reviews, the whole acceptance block becomes
+`null`. Other reviewed parts retain their acceptance. The previous IDs,
 identities and corrections are preserved for inspection; repeating the rerun
 cannot silently bind them to the new metadata. Counts and suspects from the
 rejected score are not published.

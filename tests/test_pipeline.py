@@ -1007,3 +1007,46 @@ def test_review_pipeline_output_survives_rerun(setup: Setup, capsys):
     assert rerun.hand_corrected == reviewed.hand_corrected
     assert rerun.part_identities == reviewed.part_identities
     assert rerun.acceptance == reviewed.acceptance
+
+
+@pytest.mark.parametrize("change", ["name", "instrument"])
+@pytest.mark.parametrize("corrections", [[], ["2"]], ids=["empty-review", "corrected-review"])
+def test_single_part_review_rejects_changed_identity_and_recovers(
+    setup: Setup, monkeypatch, change, corrections
+):
+    assert setup.run() == 0
+    assert main(["review", str(setup.item_dir), *corrections, "--replace"]) == 0
+    reviewed = setup.status()
+    published = (setup.item_dir / f"{STEM}.mscz").read_bytes()
+    original = ET.fromstring(omr_score())
+    declaration = original.find("part-list/score-part")
+    if change == "name":
+        declaration.find("part-name").text = "Changed name"
+    else:
+        declaration.find("score-instrument/instrument-name").text = "Changed instrument"
+    monkeypatch.setenv(
+        AUDIVERIS_ENV_VAR,
+        str(fake_audiveris(setup.bin, [ET.tostring(original, encoding="unicode")])),
+    )
+    for _ in range(2):
+        assert setup.run() == 1
+        rejected = setup.status()
+        assert rejected.hand_corrected == reviewed.hand_corrected
+        assert rejected.part_identities == reviewed.part_identities
+        assert rejected.acceptance is None
+        assert rejected.stage("durations").status == "failed"
+        assert rejected.stage("fixup").status == "skipped"
+        assert rejected.stage("musescore").status == "skipped"
+        assert [s.code for s in rejected.review_signals] == ["part_identity_changed"]
+        assert rejected.review_signals[0].part_id == reviewed.part_ids[0]
+        assert (setup.item_dir / f"{STEM}.mscz").read_bytes() == published
+    prepared = _prepare(setup.manifest, "0", setup.output)
+    assert prepared.status.acceptance is None
+    assert prepared.status.review_signals == rejected.review_signals
+    assert main(["review", str(setup.item_dir), *corrections, "--replace"]) == 0
+    renewed = setup.status()
+    assert renewed.part_identities != reviewed.part_identities
+    assert renewed.acceptance == reviewed.acceptance
+    assert renewed.review_signals == ()
+    assert setup.run() == 0
+    assert setup.status().acceptance == reviewed.acceptance

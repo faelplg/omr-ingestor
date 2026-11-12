@@ -1,5 +1,6 @@
 import json
 import os
+from dataclasses import replace
 
 import pytest
 
@@ -423,3 +424,23 @@ def test_structural_identity_signal_does_not_invalidate_part_acceptance(part_id)
     )
     assert item.acceptance["P1"].accepted
     assert item.review_required
+
+
+@pytest.mark.parametrize("corrections", [(), ("7",)])
+def test_changed_single_part_identity_withholds_acceptance_and_rejects_stale_block(
+    tmp_path, corrections
+):
+    item = sample(
+        part_ids=("P1",),
+        part_identities={"P1": PartIdentity("Original")},
+        hand_corrected=corrections,
+        review_signals=(ReviewSignal("part_identity_changed", "identity changed", part_id="P1"),),
+    )
+    path = tmp_path / "status.json"
+    write_status(item, path)
+    assert read_status(path) == item
+    assert item.acceptance is None
+    data = item.to_dict()
+    data["acceptance"] = replace(item, review_signals=()).to_dict()["acceptance"]
+    with pytest.raises(StatusError, match="acceptance"):
+        ItemStatus.from_dict(data)

@@ -13,10 +13,11 @@ are unreviewed (`null` acceptance); empty lists mean reviewed with no
 corrections. Every part needs source-backed review and must independently meet
 the <=5% limit.
 
-On rerun, identity-backed per-part reviews require the same ID, raw part name
+On rerun, identity-backed reviews require the same ID, raw part name
 and instrument names. Changed or missing identities stop before fixup and
 conversion, retain the old corrections for inspection, and set affected parts'
-acceptance to `null`. A `part_identity_changed` signal in `status.json`
+acceptance to `null`. For single-part reviews, the entire acceptance block is
+`null`. A `part_identity_changed` signal in `status.json`
 explains why each part needs source review again. Names and instruments come
 from the raw OMR score, before manifest-based fixup overwrites them. Identical
 or absent metadata can still hide swapped music; this check does not prove

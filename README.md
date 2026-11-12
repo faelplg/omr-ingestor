@@ -99,7 +99,7 @@ score-wide or part-wide scope).
   An identity mismatch fails the durations stage after recording the signal;
   fixup and conversion are skipped to prevent transforming an ambiguous part.
   Correct the MusicXML part IDs or rerun OMR before attempting instrument fixup.
-- `part_identity_changed`: reruns with per-part corrections compare raw part names
+- `part_identity_changed`: reruns with identity-backed corrections compare raw part names
   and instruments against the recorded identities for each reviewed ID. A
   difference fails durations, keeps prior corrections and sets that part's
   acceptance to `null`. Fixup and conversion are skipped until review is renewed

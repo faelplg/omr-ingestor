@@ -297,7 +297,7 @@ def _durations(ctx: _Context) -> str:
     root = read_musicxml(ctx.raw_musicxml)
     ids = tuple(part_ids(root))
     identities = raw_part_identities(root)
-    if isinstance(ctx.status.hand_corrected, dict) and ctx.status.part_identities is not None:
+    if ctx.status.reviewed_part_ids and ctx.status.part_identities is not None:
         mismatches = tuple(
             ReviewSignal(
                 code="part_identity_changed",
@@ -311,7 +311,7 @@ def _durations(ctx: _Context) -> str:
                     "review this part against the source again"
                 ),
             )
-            for pid in ctx.status.hand_corrected
+            for pid in ctx.status.reviewed_part_ids
             if pid not in ids or identities.get(pid) != ctx.status.part_identities[pid]
         )
         if mismatches:
@@ -549,9 +549,10 @@ def _prepare(manifest_path: Path, selector: str, output_dir: Path) -> _Context:
         review_signals=tuple(
             signal
             for signal in previous.review_signals
-            if signal.code == "part_identity_changed" and signal.part_id in previous.hand_corrected
+            if signal.code == "part_identity_changed"
+            and signal.part_id in previous.reviewed_part_ids
         )
-        if previous and isinstance(previous.hand_corrected, dict)
+        if previous
         else (),
         audiveris_options=dict(item.get("audiveris_options", {})),
     )

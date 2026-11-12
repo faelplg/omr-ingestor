@@ -208,6 +208,19 @@ class ItemStatus:
         )
 
     @property
+    def reviewed_part_ids(self) -> tuple[str, ...]:
+        """Reviewed IDs; a shared list identifies a part only for confirmed single-part items."""
+        if isinstance(self.hand_corrected, dict):
+            return tuple(self.hand_corrected)
+        if (
+            self.hand_corrected is not None
+            and self.part_ids is not None
+            and len(self.part_ids) == 1
+        ):
+            return self.part_ids
+        return ()
+
+    @property
     def acceptance(self) -> Acceptance | dict[str, Acceptance | None] | None:
         """Per-part 5% criterion; flat lists require confirmed single-part identity."""
         if self.hand_corrected is None:
@@ -226,6 +239,11 @@ class ItemStatus:
         acceptance = self._acceptance(self.hand_corrected)
         if self.part_ids is None or len(self.part_ids) != 1:
             return replace(acceptance, accepted=None)
+        if any(
+            signal.code == "part_identity_changed" and signal.part_id == self.part_ids[0]
+            for signal in self.review_signals
+        ):
+            return None
         return acceptance
 
     def to_dict(self) -> dict[str, Any]:
@@ -479,7 +497,7 @@ def _from_dict(cls: type[ItemStatus], data: Any, source: str) -> ItemStatus:
     # Validate their original calculation, then normalize to unknown acceptance.
     legacy_acceptance = (
         acceptance_dict(item._acceptance(hand))
-        if isinstance(hand, tuple) and item.acceptance.accepted is None
+        if isinstance(hand, tuple) and (item.part_ids is None or len(item.part_ids) != 1)
         else expected_acceptance
     )
     if data["acceptance"] not in (expected_acceptance, legacy_acceptance):
