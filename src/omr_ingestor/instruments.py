@@ -9,12 +9,14 @@ from typing import Any
 
 from omr_ingestor.paths import INSTRUMENTS_PATH
 
-VALID_SOUND_IDS = frozenset(
-    sound.attrib["id"]
-    for sound in ET.fromstring(
-        files("omr_ingestor").joinpath("data/sounds.xml").read_bytes()
-    ).findall("sound")
-)
+
+def _load_sound_ids() -> frozenset[str]:
+    # sounds.xml ships inside the wheel, unlike the external instruments.json.
+    sounds = ET.fromstring(files("omr_ingestor").joinpath("data/sounds.xml").read_bytes())
+    return frozenset(sound.attrib["id"] for sound in sounds.findall("sound"))
+
+
+VALID_SOUND_IDS = _load_sound_ids()
 
 VALID_CLEFS = frozenset({"G2", "F4"})
 
@@ -72,7 +74,7 @@ def _parse_instrument(raw: Any, where: str) -> Instrument:
     if clef not in VALID_CLEFS:
         raise InstrumentsError(f"{where}.clef: {clef!r} is not one of {sorted(VALID_CLEFS)}")
     instrument_id = _expect(obj["id"], str, f"{where}.id")
-    sound_where = f"{where} instrument {instrument_id!r}.instrument_sound"
+    sound_where = f"{where}.instrument_sound (instrument {instrument_id!r})"
     instrument_sound = _expect(obj["instrument_sound"], str, sound_where)
     if not instrument_sound.strip():
         raise InstrumentsError(
