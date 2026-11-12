@@ -10,7 +10,7 @@ import pytest
 
 from omr_ingestor.audiveris import AUDIVERIS_ENV_VAR
 from omr_ingestor.cli import main
-from omr_ingestor.durations import check_review_signals
+from omr_ingestor.durations import ReviewSignal, check_review_signals
 from omr_ingestor.instruments import load_instruments
 from omr_ingestor.musescore import MUSESCORE_ENV_VAR
 from omr_ingestor.musicxml import read_musicxml
@@ -709,6 +709,7 @@ def test_multipart_hand_corrections_survive_rerun_and_reach_batch(
     if legacy:
         data["schema_version"] = 5
         del data["part_ids"]
+        del data["part_identities"]
         data["acceptance"]["accepted"] = True
     (setup.item_dir / "status.json").write_text(json.dumps(data))
     capsys.readouterr()
@@ -742,7 +743,7 @@ def test_rerun_preserves_corrections_when_part_ids_change(setup, monkeypatch, re
     monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [multipart_xml()])))
     monkeypatch.setenv(MUSESCORE_ENV_VAR, str(fake_musescore(setup.bin, two_trumpet_mscx())))
     assert setup.run() == 0
-    reviewed = replace(setup.status(), hand_corrected={"P2": ("1",)})
+    reviewed = replace(setup.status(), hand_corrected={"P2": ("1",)}, part_identities=None)
     write_status(reviewed, setup.item_dir / "status.json")
     xml = multipart_xml().replace('"P2"', replacement)
     monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [xml])))
@@ -788,7 +789,7 @@ def test_rerun_rejects_removal_of_unreviewed_part(setup, monkeypatch, correction
     monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [multipart_xml()])))
     monkeypatch.setenv(MUSESCORE_ENV_VAR, str(fake_musescore(setup.bin, two_trumpet_mscx())))
     assert setup.run() == 0
-    reviewed = replace(setup.status(), hand_corrected=corrections)
+    reviewed = replace(setup.status(), hand_corrected=corrections, part_identities=None)
     write_status(reviewed, setup.item_dir / "status.json")
     xml = multipart_xml().replace('"P2"', '"P3"')
     monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [xml])))
@@ -825,3 +826,159 @@ def test_duration_allows_additional_part_and_preserves_unreviewed_identity(setup
     assert ctx.status.hand_corrected == {"P1": ("1",)}
     assert ctx.status.acceptance["P2"] is None
     assert ctx.status.acceptance["P3"] is None
+
+
+def identity_score(names=("Trumpet 1", "Trumpet 2"), instruments=("Trumpet", "Trumpet")):
+    root = ET.fromstring(multipart_xml())
+    for part, name, instrument in zip(
+        root.findall("part-list/score-part"), names, instruments, strict=True
+    ):
+        part.find("part-name").text = name
+        score_instrument = ET.SubElement(part, "score-instrument", id=part.get("id") + "-I1")
+        ET.SubElement(score_instrument, "instrument-name").text = instrument
+    return ET.tostring(root, encoding="unicode")
+
+
+@pytest.mark.parametrize("change", ["dropped", "reordered", "renamed", "instrument", "unchanged"])
+def test_rerun_checks_raw_part_identity_before_reusing_hand_corrections(setup, monkeypatch, change):
+    configure_parts(setup, ["Trumpet 1", "Trumpet 2"])
+    original = identity_score()
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [original])))
+    monkeypatch.setenv(MUSESCORE_ENV_VAR, str(fake_musescore(setup.bin, two_trumpet_mscx())))
+    assert setup.run() == 0
+    reviewed = replace(setup.status(), hand_corrected={"P1": ("1",), "P2": ()})
+    assert reviewed.to_dict()["part_identities"] == {
+        "P1": {"part_name": "Trumpet 1", "instruments": ["Trumpet"]},
+        "P2": {"part_name": "Trumpet 2", "instruments": ["Trumpet"]},
+    }
+    write_status(reviewed, setup.item_dir / "status.json")
+    published = (setup.item_dir / f"{STEM}.mscz").read_bytes()
+    if change == "dropped":
+        # Drop the first voice and let Audiveris renumber the remaining one as P1.
+        root = ET.fromstring(original)
+        root.find("part-list").remove(root.find("part-list/score-part"))
+        root.remove(root.find("part"))
+        root.find("part-list/score-part").set("id", "P1")
+        root.find("part").set("id", "P1")
+        changed = ET.tostring(root, encoding="unicode")
+    elif change == "reordered":
+        changed = identity_score(names=("Trumpet 2", "Trumpet 1"))
+    elif change == "renamed":
+        changed = identity_score(names=("Renamed voice", "Trumpet 2"))
+    elif change == "instrument":
+        changed = identity_score(instruments=("Flute", "Trumpet"))
+    else:
+        changed = original
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [changed])))
+    for _ in range(2):
+        assert setup.run() == (0 if change == "unchanged" else 1)
+        status = setup.status()
+        assert status.hand_corrected == reviewed.hand_corrected
+        assert status.part_identities == reviewed.part_identities
+        if change == "unchanged":
+            assert status.acceptance == reviewed.acceptance
+            assert not any(s.code == "part_identity_changed" for s in status.review_signals)
+        else:
+            assert status.review_required
+            assert status.stage("durations").status == "failed"
+            assert status.stage("fixup").status == "skipped"
+            assert status.stage("musescore").status == "skipped"
+            affected = {"P1", "P2"} if change in ("dropped", "reordered") else {"P1"}
+            signals = [s for s in status.review_signals if s.code == "part_identity_changed"]
+            assert {s.part_id for s in signals} == affected
+            assert all("hand corrections withheld" in s.detail for s in signals)
+            assert all("review this part" in s.detail for s in signals)
+            assert all("PartIdentity(" not in s.detail for s in signals)
+            assert all('recorded name "Trumpet' in s.detail for s in signals)
+            if change == "dropped":
+                assert "missing from the current score" in next(
+                    s.detail for s in signals if s.part_id == "P2"
+                )
+            assert all(status.acceptance[pid] is None for pid in affected)
+            if "P2" not in affected:
+                assert status.acceptance["P2"] == reviewed.acceptance["P2"]
+            assert (setup.item_dir / f"{STEM}.mscz").read_bytes() == published
+    if change != "unchanged":
+        # An early failure on a later rerun cannot make the rejected review accepted.
+        prepared = _prepare(setup.manifest, "0", setup.output)
+        assert prepared.status.review_signals == status.review_signals
+        assert prepared.status.acceptance == status.acceptance
+
+
+def test_legacy_per_part_review_keeps_id_only_matching(setup, monkeypatch):
+    configure_parts(setup, ["Trumpet 1", "Trumpet 2"])
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [identity_score()])))
+    monkeypatch.setenv(MUSESCORE_ENV_VAR, str(fake_musescore(setup.bin, two_trumpet_mscx())))
+    assert setup.run() == 0
+    data = replace(setup.status(), hand_corrected={"P1": ("1",)}).to_dict()
+    data["schema_version"] = 6
+    del data["part_identities"]
+    (setup.item_dir / "status.json").write_text(json.dumps(data))
+    changed = identity_score(names=("Trumpet 2", "Trumpet 1"))
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [changed])))
+    for _ in range(2):
+        assert setup.run() == 0
+        assert setup.status().part_identities is None
+        assert setup.status().hand_corrected == {"P1": ("1",)}
+
+
+@pytest.mark.parametrize("recovery", ["original_score", "remove_affected_review"])
+def test_rerun_recovers_from_changed_part_identity(setup, monkeypatch, recovery):
+    configure_parts(setup, ["Trumpet 1", "Trumpet 2"])
+    original = identity_score()
+    changed = identity_score(names=("Renamed voice", "Trumpet 2"))
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [original])))
+    monkeypatch.setenv(MUSESCORE_ENV_VAR, str(fake_musescore(setup.bin, two_trumpet_mscx())))
+    assert setup.run() == 0
+    reviewed = replace(setup.status(), hand_corrected={"P1": ("1",), "P2": ()})
+    write_status(reviewed, setup.item_dir / "status.json")
+    monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [changed])))
+    assert setup.run() == 1
+    rejected = setup.status()
+    assert rejected.acceptance["P1"] is None
+    assert any(s.code == "part_identity_changed" for s in rejected.review_signals)
+
+    if recovery == "original_score":
+        monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [original])))
+    else:
+        # Removing only this review entry also clears its derived acceptance.
+        pending = replace(rejected, hand_corrected={"P2": ()})
+        write_status(pending, setup.item_dir / "status.json")
+        prepared = _prepare(setup.manifest, "0", setup.output)
+        assert prepared.status.review_signals == ()
+
+    assert setup.run() == 0
+    recovered = setup.status()
+    assert not any(s.code == "part_identity_changed" for s in recovered.review_signals)
+    assert recovered.acceptance["P2"] == reviewed.acceptance["P2"]
+    if recovery == "original_score":
+        assert recovered.hand_corrected == reviewed.hand_corrected
+        assert recovered.acceptance == reviewed.acceptance
+        assert recovered.part_identities == reviewed.part_identities
+    else:
+        assert recovered.hand_corrected == {"P2": ()}
+        assert recovered.acceptance["P1"] is None
+        assert recovered.part_identities["P1"].part_name == "Renamed voice"
+
+
+@pytest.mark.parametrize("corrections", [None, (), {"P1": ()}, {}])
+def test_prepare_carries_only_identity_changes_for_reviewed_parts(setup, corrections):
+    configure_parts(setup, ["Trumpet 1", "Trumpet 2"])
+    ctx = _prepare(setup.manifest, "0", setup.output)
+    signals = (
+        ReviewSignal("part_identity", "duplicate IDs"),
+        ReviewSignal("part_identity", "structural error", part_id="P1"),
+        ReviewSignal("part_identity_changed", "renamed P1", part_id="P1"),
+        ReviewSignal("part_identity_changed", "renamed P2", part_id="P2"),
+        ReviewSignal("part_identity_changed", "score-wide change"),
+    )
+    previous = replace(
+        ctx.status,
+        part_ids=("P1", "P2"),
+        hand_corrected=corrections,
+        review_signals=signals,
+    )
+    ctx.paths.item_dir.mkdir(parents=True)
+    write_status(previous, ctx.paths.status)
+    prepared = _prepare(setup.manifest, "0", setup.output)
+    assert prepared.status.review_signals == ((signals[2],) if corrections == {"P1": ()} else ())

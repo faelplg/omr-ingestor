@@ -267,7 +267,13 @@ class ReviewSignal:
 
 
 REVIEW_SIGNAL_CODES = frozenset(
-    {"measure_count_mismatch", "part_count_mismatch", "part_identity", "navigation_lyric"}
+    {
+        "measure_count_mismatch",
+        "part_count_mismatch",
+        "part_identity",
+        "part_identity_changed",
+        "navigation_lyric",
+    }
 )
 
 

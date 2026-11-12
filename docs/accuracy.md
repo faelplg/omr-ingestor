@@ -2,17 +2,39 @@
 
 Passing the pipeline does not establish musical fidelity. Acceptance still
 requires source-backed human review. The **<=5%** hand-correction ratio is
-computed **per part**: that part's corrected measure count divided by the item's
-`expected_measures`. Single-part items keep the `hand_corrected` list format.
-Multipart items use a mapping keyed by MusicXML part ID, for example
+computed **per part**: that part's corrected measure count divided by the
+item's `expected_measures`. Single-part items keep the `hand_corrected` list
+format. Multipart items use a mapping keyed by MusicXML part ID, for example
 `{"P1": ["7"], "P2": ["7", "12a"]}`. A measure may be recorded in both parts,
-but duplicates within a part are rejected. Status schema 6 records `part_ids`
-and per-part `acceptance`; batch schema 4 reports the same ratios in `batch.json`
-and the terminal summary. Missing mapping entries are unreviewed (`null`
-acceptance); empty lists mean reviewed with no corrections. Every part needs
-source-backed review and must independently meet the <=5% limit.
+but duplicates within a part are rejected. Status schema 7 records `part_ids`,
+raw `part_identities` and per-part `acceptance`; batch schema 4 reports the
+same ratios in `batch.json` and the terminal summary. Missing mapping entries
+are unreviewed (`null` acceptance); empty lists mean reviewed with no
+corrections. Every part needs source-backed review and must independently meet
+the <=5% limit.
 
-Older status files still load. A multipart item's old shared list keeps its
+On rerun, identity-backed per-part reviews require the same ID, raw part name
+and instrument names. Changed or missing identities stop before fixup and
+conversion, retain the old corrections for inspection, and set affected parts'
+acceptance to `null`. A `part_identity_changed` signal in `status.json`
+explains why each part needs source review again. Names and instruments come
+from the raw OMR score, before manifest-based fixup overwrites them. Identical
+or absent metadata can still hide swapped music; this check does not prove
+musical continuity. For an intentional change that preserves IDs, remove only
+the affected part's `hand_corrected` entry and clear its derived acceptance by
+setting `acceptance.<part ID>` to `null`, then rerun. Other parts keep their
+reviews. After the new identity is captured, review that part against the
+source and record its corrections again. Missing prior IDs still require a
+fresh review. Alternatively, restoring the original score clears the change
+signal and restores acceptance on a successful rerun.
+
+Older status files still load. Schemas 1-6 have no identity metadata and keep
+ID-only matching for their existing corrections, including on repeated reruns.
+They cannot detect renumbering that reuses the same IDs. Archive the prior status
+and rerun before recording a fresh source-backed review to enable metadata
+checking.
+
+A multipart item's old shared list keeps its
 original item-wide ratio, including after rerunning, but `accepted` is `null`.
 A <=5% shared ratio does not establish per-part acceptance. The batch JSON marks
 its `acceptance_scope` as `legacy_item_wide`, and the terminal summary identifies
@@ -47,7 +69,7 @@ reproduced here. The linked issues track the unresolved accuracy work.
 | Dropped system or last measure ([#24](https://github.com/faelplg/omr-ingestor/issues/24)) | `measure_count_mismatch` compares each part with `expected_measures` even when all retained bars have valid durations. It cannot locate the loss; the warning is anchored at the part's first measure. Batch also compares available counts. | Neither Portuguese OCR nor 300/400/600 dpi recovered the dropped final system. A separate input also retained a missing measure throughout the matrix. Higher resolution can reduce false marks while leaving completeness broken. |
 | Small duration errors ([#25](https://github.com/faelplg/omr-ingestor/issues/25)) | Duration suspects catch a missing short rest when the bar total changes. They cannot detect wrong note/rest distributions that preserve the total, and pickup/implicit-bar allowances limit detection. | Portuguese OCR with 400 or 600 dpi restored the diagnosed missing short rest; 600 also corrected the equal-duration substitution above. Source review is still required. |
 | Missed multi-measure rests and collapsed tied whole notes ([#15](https://github.com/faelplg/omr-ingestor/issues/15)) | Recognized `<multiple-rest>` starts are always suspect, even with valid duration. Empty bars are suspect when duration fails; count checks can reveal missing bars. Neither recovers lost rests or pitches or detects every collapse. | No general setting was validated for these initial findings. Test input-specific recognition settings and correct from the source. |
-| OCR splits a multipart score into artificial parts | `part_count_mismatch` flags an unexpected count and fixup stops. `part_identity` checks IDs against declarations, not continuity, voice swaps or artificial rest distributions. Padded parts can all pass duration checks. | Disable OCR with `TesseractOCR.useOCR=false` at default resolution for the affected multipart input. The tested control kept Portuguese selected and disabled OCR, retaining two continuous parts; `useOCR=false` alone was not run separately. Selecting English with OCR enabled still produced extra parts. |
+| OCR splits a multipart score into artificial parts | `part_count_mismatch` flags an unexpected count and fixup stops. `part_identity` checks IDs against declarations; `part_identity_changed` compares raw names and instruments on reruns with identity-backed per-part reviews. It cannot detect voice swaps with identical metadata or artificial rest distributions. Padded parts can all pass duration checks. | Disable OCR with `TesseractOCR.useOCR=false` at default resolution for the affected multipart input. The tested control kept Portuguese selected and disabled OCR, retaining two continuous parts; `useOCR=false` alone was not run separately. Selecting English with OCR enabled still produced extra parts. |
 | D.C. and other navigation recognized as lyrics or lost | `navigation_lyric` flags matching lyric text, even if navigation directions already exist. It cannot detect navigation absent from both lyrics and directions or reconstruct its placement/meaning. | No matrix configuration exported D.C. as correct navigation. Installed OCR languages alone did not solve it. With OCR disabled or at higher resolution, missing text can also remove the lyric hint. Verify navigation manually. |
 
 ## Audiveris settings per item

@@ -10,6 +10,7 @@ Versions 1 and 2 did not record audiveris_options; these read as None (unknown).
 Versions 1-3 did not record review signals; these read as an empty tuple.
 Versions 1-4 did not record text removals; these read as None (unknown).
 Versions 1-5 did not record part_ids; shared correction lists retain item-wide acceptance.
+Versions 1-6 did not record part identities; reruns retain ID-only matching.
 """
 
 import json
@@ -24,8 +25,8 @@ from typing import Any
 from omr_ingestor.durations import REVIEW_SIGNAL_CODES, ReviewSignal
 from omr_ingestor.fixup import TEXT_REMOVAL_CATEGORIES
 
-SCHEMA_VERSION = 6
-READABLE_SCHEMA_VERSIONS = (1, 2, 3, 4, 5, 6)
+SCHEMA_VERSION = 7
+READABLE_SCHEMA_VERSIONS = (1, 2, 3, 4, 5, 6, 7)
 ACCEPTANCE_PERCENT = 5  # up to 5% of expected_measures corrected by hand
 ACCEPTANCE_LIMIT = ACCEPTANCE_PERCENT / 100
 RATIO_DIGITS = 6
@@ -92,6 +93,18 @@ class MeasureCount:
 
 
 @dataclass(frozen=True, slots=True)
+class PartIdentity:
+    part_name: str
+    instruments: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        _expect(self.part_name, str, "part identity name")
+        _expect(self.instruments, tuple, "part identity instruments")
+        for name in self.instruments:
+            _expect(name, str, "part identity instrument name")
+
+
+@dataclass(frozen=True, slots=True)
 class ItemStatus:
     pdf: str
     instrument: str
@@ -104,6 +117,8 @@ class ItemStatus:
     hand_corrected: tuple[str, ...] | dict[str, tuple[str, ...]] | None = None
     # MusicXML IDs in score order; reruns retain prior IDs until counting succeeds.
     part_ids: tuple[str, ...] | None = None
+    # Raw score metadata, before instrument fixup; None keeps legacy ID-only matching.
+    part_identities: dict[str, PartIdentity] | None = None
     tool_versions: dict[str, str] = field(default_factory=dict)
     # Overrides passed to Audiveris; {} uses tool defaults, None means not recorded.
     audiveris_options: dict[str, str] | None = field(default_factory=dict)
@@ -144,6 +159,12 @@ class ItemStatus:
             raise StatusError(f"duplicate stage in {names}")
         if self.part_ids is not None:
             _validate_measures(self.part_ids, "part_ids")
+        if self.part_identities is not None:
+            _expect(self.part_identities, dict, "part_identities")
+            if self.part_ids is None or set(self.part_identities) != set(self.part_ids):
+                raise StatusError("part_identities must match part_ids exactly")
+            for identity in self.part_identities.values():
+                _expect(identity, PartIdentity, "part_identities entry")
         if isinstance(self.hand_corrected, dict):
             if self.part_ids is None or len(self.part_ids) < 2:
                 raise StatusError("per-part hand_corrected requires multipart part_ids")
@@ -195,6 +216,10 @@ class ItemStatus:
             return {
                 part_id: self._acceptance(self.hand_corrected[part_id])
                 if part_id in self.hand_corrected
+                and not any(
+                    signal.code == "part_identity_changed" and signal.part_id == part_id
+                    for signal in self.review_signals
+                )
                 else None
                 for part_id in self.part_ids
             }
@@ -233,6 +258,12 @@ class ItemStatus:
                 {"number": m.number, "detail": m.detail} for m in self.suspect_measures
             ],
             "part_ids": None if self.part_ids is None else list(self.part_ids),
+            "part_identities": None
+            if self.part_identities is None
+            else {
+                pid: {"part_name": identity.part_name, "instruments": list(identity.instruments)}
+                for pid, identity in self.part_identities.items()
+            },
             "hand_corrected": {
                 part_id: list(measures) for part_id, measures in sorted(self.hand_corrected.items())
             }
@@ -302,12 +333,14 @@ _TOP_KEYS = (
     "stages",
     "suspect_measures",
     "part_ids",
+    "part_identities",
     "hand_corrected",
     "acceptance",
     "tool_versions",
     "audiveris_options",
 )
-_V5_TOP_KEYS = tuple(k for k in _TOP_KEYS if k != "part_ids")
+_V6_TOP_KEYS = tuple(k for k in _TOP_KEYS if k != "part_identities")
+_V5_TOP_KEYS = tuple(k for k in _V6_TOP_KEYS if k != "part_ids")
 _V4_TOP_KEYS = tuple(k for k in _V5_TOP_KEYS if k != "text_removals")
 _V3_TOP_KEYS = tuple(k for k in _V4_TOP_KEYS if k not in ("review_required", "review_signals"))
 _V2_TOP_KEYS = tuple(k for k in _V3_TOP_KEYS if k != "audiveris_options")
@@ -328,7 +361,8 @@ def _from_dict(cls: type[ItemStatus], data: Any, source: str) -> ItemStatus:
         3: _V3_TOP_KEYS,
         4: _V4_TOP_KEYS,
         5: _V5_TOP_KEYS,
-        6: _TOP_KEYS,
+        6: _V6_TOP_KEYS,
+        7: _TOP_KEYS,
     }
     keys = keys_by_version[version]
     if sorted(data) != sorted(keys):
@@ -378,6 +412,23 @@ def _from_dict(cls: type[ItemStatus], data: Any, source: str) -> ItemStatus:
         ids = tuple(
             _expect(n, str, f"{source}.part_ids") for n in _expect(ids, list, f"{source}.part_ids")
         )
+    identities = data.get("part_identities")
+    if identities is not None:
+        _expect(identities, dict, f"{source}.part_identities")
+        parsed = {}
+        for pid, identity in identities.items():
+            where = f"{source}.part_identities.{pid}"
+            _expect(identity, dict, where)
+            if set(identity) != {"part_name", "instruments"}:
+                raise StatusError(f"{where}: expected part_name and instruments")
+            parsed[pid] = PartIdentity(
+                part_name=_expect(identity["part_name"], str, f"{where}.part_name"),
+                instruments=tuple(
+                    _expect(name, str, f"{where}.instruments")
+                    for name in _expect(identity["instruments"], list, f"{where}.instruments")
+                ),
+            )
+        identities = parsed
     versions = _expect(data["tool_versions"], dict, f"{source}.tool_versions")
     for k, v in versions.items():
         _expect(v, str, f"{source}.tool_versions.{k}")
@@ -411,6 +462,7 @@ def _from_dict(cls: type[ItemStatus], data: Any, source: str) -> ItemStatus:
         suspect_measures=suspects,
         hand_corrected=hand,
         part_ids=ids,
+        part_identities=identities,
         tool_versions=dict(versions),
         audiveris_options=None if options is None else dict(options),
     )

@@ -46,6 +46,7 @@ from omr_ingestor.musicxml import MusicXMLError, part_ids, read_musicxml, write_
 from omr_ingestor.status import (
     STAGE_NAMES,
     ItemStatus,
+    PartIdentity,
     Stage,
     StageState,
     StatusError,
@@ -283,9 +284,49 @@ def _xsd(ctx: _Context) -> str:
     return "valid"
 
 
+def _describe_part_identity(identity: PartIdentity | None) -> str:
+    if identity is None:
+        return "missing from the current score"
+    name = identity.part_name or "(unnamed)"
+    instruments = ", ".join(identity.instruments) or "(none recorded)"
+    return f'name "{name}", instruments: {instruments}'
+
+
 def _durations(ctx: _Context) -> str:
     root = read_musicxml(ctx.raw_musicxml)
     ids = tuple(part_ids(root))
+    identities = {
+        part.get("id", ""): PartIdentity(
+            part_name=part.findtext("part-name") or "",
+            instruments=tuple(
+                instrument.findtext("instrument-name") or ""
+                for instrument in part.findall("score-instrument")
+            ),
+        )
+        for part in root.findall("part-list/score-part")
+    }
+    if isinstance(ctx.status.hand_corrected, dict) and ctx.status.part_identities is not None:
+        mismatches = tuple(
+            ReviewSignal(
+                code="part_identity_changed",
+                part_id=pid,
+                detail=(
+                    f"part {pid} identity changed: recorded "
+                    f"{_describe_part_identity(ctx.status.part_identities[pid])}; "
+                    "current "
+                    f"{_describe_part_identity(identities.get(pid) if pid in ids else None)}; "
+                    "hand corrections withheld, "
+                    "review this part against the source again"
+                ),
+            )
+            for pid in ctx.status.hand_corrected
+            if pid not in ids or identities.get(pid) != ctx.status.part_identities[pid]
+        )
+        if mismatches:
+            ctx.status = replace(ctx.status, review_signals=mismatches)
+            raise StageError(
+                "part identity changed; recorded hand corrections require review again"
+            )
     if not set(ctx.status.part_ids or ()).issubset(ids):
         raise StageError(
             "recorded part IDs do not match the current score: prior parts are missing"
@@ -323,7 +364,14 @@ def _durations(ctx: _Context) -> str:
             "unsafe part identity: part IDs must be unique and match the score-part "
             "declarations; correct the MusicXML part IDs or rerun OMR before instrument fixup"
         )
-    ctx.status = replace(ctx.status, part_ids=ids)
+    ctx.status = replace(
+        ctx.status,
+        part_ids=ids,
+        # Do not retroactively attach new metadata to legacy review records.
+        part_identities=None
+        if ctx.status.part_identities is None and ctx.status.hand_corrected is not None
+        else identities,
+    )
     expected = ctx.status.expected_measures
     read = "/".join(map(str, counts)) or "0"
     if ctx.parts is not None:
@@ -504,6 +552,15 @@ def _prepare(manifest_path: Path, selector: str, output_dir: Path) -> _Context:
         stages=tuple(Stage(name, StageState.PENDING) for name in STAGE_NAMES),
         hand_corrected=previous.hand_corrected if previous else None,
         part_ids=previous.part_ids if previous else None,
+        part_identities=previous.part_identities if previous else None,
+        # Keep invalidated reviews unknown until the new score passes identity checks.
+        review_signals=tuple(
+            signal
+            for signal in previous.review_signals
+            if signal.code == "part_identity_changed" and signal.part_id in previous.hand_corrected
+        )
+        if previous and isinstance(previous.hand_corrected, dict)
+        else (),
         audiveris_options=dict(item.get("audiveris_options", {})),
     )
     return _Context(

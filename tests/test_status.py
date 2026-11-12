@@ -6,6 +6,7 @@ import pytest
 from omr_ingestor.durations import ReviewSignal
 from omr_ingestor.status import (
     ItemStatus,
+    PartIdentity,
     Stage,
     StageState,
     StatusError,
@@ -66,11 +67,13 @@ def test_measure_count_records_missing_and_extra_measures():
     assert sample(measures_read=62).measure_count.missing == -2
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 4, 5])
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 6])
 def test_reads_legacy_schema_versions_and_preserves_review(tmp_path, version):
     path = tmp_path / "status.json"
     data = sample().to_dict()
-    del data["part_ids"]
+    del data["part_identities"]
+    if version < 6:
+        del data["part_ids"]
     if version < 5:
         del data["text_removals"]
     if version < 4:
@@ -83,14 +86,14 @@ def test_reads_legacy_schema_versions_and_preserves_review(tmp_path, version):
     data["schema_version"] = version
     path.write_text(json.dumps(data), encoding="utf-8")
     expected = sample(
-        part_ids=None,
+        part_ids=None if version < 6 else ("P1",),
         audiveris_options=None if version < 3 else {},
         measures_read=None if version == 1 else 51,
     )
     assert read_status(path) == expected
     write_status(read_status(path), path)
     assert read_status(path) == expected
-    assert json.loads(path.read_text())["schema_version"] == 6
+    assert json.loads(path.read_text())["schema_version"] == 7
 
 
 def test_audiveris_options_round_trip(tmp_path):
@@ -123,6 +126,7 @@ def test_stable_key_order_and_bytes(tmp_path):
         "stages",
         "suspect_measures",
         "part_ids",
+        "part_identities",
         "hand_corrected",
         "acceptance",
         "tool_versions",
@@ -201,7 +205,7 @@ def test_invalid_values_raise(make, message):
     ("edit", "message"),
     [
         (lambda d: d["acceptance"].update(accepted=False), "does not match"),
-        (lambda d: d.update(schema_version=7), "schema_version"),
+        (lambda d: d.update(schema_version=8), "schema_version"),
         (lambda d: d.pop("audiveris_options"), "keys"),
         (lambda d: d.update(audiveris_options=[]), "audiveris_options"),
         (lambda d: d.update(audiveris_options={"constant": 600}), "audiveris_options"),
@@ -370,3 +374,52 @@ def test_invalid_per_part_correction_files_are_rejected(hand):
     data["hand_corrected"] = hand
     with pytest.raises(StatusError, match="hand_corrected"):
         ItemStatus.from_dict(data)
+
+
+def test_part_identities_round_trip_and_invalidate_only_affected_acceptance(tmp_path):
+    item = sample(
+        part_ids=("P1", "P2"),
+        part_identities={
+            "P1": PartIdentity("First", ("Trumpet", "Flugelhorn")),
+            "P2": PartIdentity("", ()),
+        },
+        hand_corrected={"P1": (), "P2": ("7",)},
+        review_signals=(ReviewSignal("part_identity_changed", "identity changed", part_id="P1"),),
+    )
+    path = tmp_path / "status.json"
+    write_status(item, path)
+    assert read_status(path) == item
+    assert item.review_required
+    assert item.acceptance["P1"] is None
+    assert item.acceptance["P2"].accepted
+
+
+@pytest.mark.parametrize(
+    "identities",
+    [
+        [],
+        {},
+        {"P2": {"part_name": "Other", "instruments": []}},
+        {"P1": {"part_name": "Name"}},
+        {"P1": {"part_name": None, "instruments": []}},
+        {"P1": {"part_name": "Name", "instruments": "Trumpet"}},
+        {"P1": {"part_name": "Name", "instruments": [1]}},
+        {"P1": {"part_name": "Name", "instruments": [], "extra": "invalid"}},
+    ],
+)
+def test_rejects_malformed_part_identities(identities):
+    data = sample().to_dict()
+    data["part_identities"] = identities
+    with pytest.raises(StatusError, match="part_identities"):
+        ItemStatus.from_dict(data)
+
+
+@pytest.mark.parametrize("part_id", ["", "P1"])
+def test_structural_identity_signal_does_not_invalidate_part_acceptance(part_id):
+    item = sample(
+        part_ids=("P1", "P2"),
+        hand_corrected={"P1": ()},
+        review_signals=(ReviewSignal("part_identity", "duplicate IDs", part_id=part_id),),
+    )
+    assert item.acceptance["P1"].accepted
+    assert item.review_required
