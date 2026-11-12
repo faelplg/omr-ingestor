@@ -121,11 +121,11 @@ def test_closing_measure_must_complete_the_pickup():
 
 
 def test_completing_pickup_requires_matching_time_signatures():
-    three_four = "<attributes><time><beats>3</beats><beat-type>4</beat-type></time></attributes>"
-    assert suspects(measure(0, DEFAULT_ATTRS + Q), measure(1, three_four + Q * 2)) == [
-        "0",
-        "1",
-    ]
+    three_four = DEFAULT_ATTRS.replace("<beats>4</beats>", "<beats>3</beats>")
+    six_eight = "<attributes><time><beats>6</beats><beat-type>8</beat-type></time></attributes>"
+    report = check(measure(0, three_four + Q), measure(1, six_eight + Q * 2))
+    assert report.suspect_numbers("P1") == ["0", "1"]
+    assert [m.partial for m in report.measures] == [False, False]
 
 
 def test_completing_pickup_rejects_different_meters_even_when_lengths_sum_to_a_bar():
