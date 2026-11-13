@@ -158,7 +158,8 @@ or renumbered part, changed name or changed instrument stops the durations stage
 before fixup and conversion. The affected part gets a `part_identity_changed`
 review signal explaining the recorded and current metadata and the need for source
 review again. Its acceptance becomes `null`, including for a previously empty
-correction list. Other reviewed parts retain their acceptance. The previous IDs,
+correction list. For single-part reviews, the whole acceptance block becomes
+`null`. Other reviewed parts retain their acceptance. The previous IDs,
 identities and corrections are preserved for inspection; repeating the rerun
 cannot silently bind them to the new metadata. Counts and suspects from the
 rejected score are not published.
@@ -169,26 +170,28 @@ schema 7; metadata is never retroactively attached to an old review. Such record
 cannot detect reused IDs after voice swaps or renumbering. To establish a fresh
 identity-backed review, archive the previous status file, rerun to capture raw
 identities, then record the per-part corrections after comparing with the source.
-For an intentional name or instrument change with the same IDs, remove only the
-affected entry from `hand_corrected` and clear its derived acceptance by setting
-`acceptance.<part ID>` to `null`. Keep the other parts' review records and the
-recorded identities. Rerun to capture the changed part's current identity, then
-review it against the source and record its corrections and acceptance again.
-The removed entry's `part_identity_changed` signal is not carried into that run.
-If previously recorded IDs are missing, use the fresh-review workflow above;
-the missing-ID safeguard still applies. Restoring the original score instead
-also clears the change signal on a successful rerun and restores acceptance.
+For an intentional name or instrument change, review the part against the source
+again, then run `omr-ingestor review output/<item> 7 12a --part P1 --replace`
+with its corrected measure labels. Use `--replace` without labels to record a
+review with no corrections. The command records that part's current raw identity,
+clears its `part_identity_changed` signal, and recomputes acceptance atomically.
+Other parts keep their reviews, and added parts remain unreviewed. Rerun to
+complete stages that stopped on the identity change. If previously recorded IDs
+are missing, archive the previous status file and rerun before recording fresh
+source-backed reviews. Restoring the original score instead also clears the
+change signal on a successful rerun and restores acceptance.
 
 All reruns also stop if any previously recorded ID disappears, including
 unreviewed parts omitted from the mapping. Additions are allowed. For legacy
 ID-only failures, the status retains the prior review without counts, suspects
 or signals from the rejected score.
-When editing `status.json` directly, update the derived `acceptance` block too;
-the reader recomputes and validates it rather than trusting stale ratios.
+Use `omr-ingestor review` to record corrections and derive the acceptance block;
+the status reader recomputes and validates it rather than trusting stale ratios.
 Before review, acceptance is unknown. This human metric is separate from stage
 success and does not clear review warnings. See [Known accuracy limits](accuracy.md)
 for detection gaps and input-specific recognition settings. Rerunning recomputes
-from the PDF and preserves the recorded human correction list; there is no automatic re-entry command for an edited MusicXML.
+from the PDF and preserves the recorded human correction list. The review command
+records human review metadata without modifying or converting score files.
 
 ## Decisions and measured evidence
 

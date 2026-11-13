@@ -43,6 +43,7 @@ from omr_ingestor.manifest import ManifestError, load_manifest
 from omr_ingestor.mscx_check import A5_LANDSCAPE, MM_PER_INCH, MscxCheckError, PageSize
 from omr_ingestor.musescore import MuseScoreError, resolve_musescore
 from omr_ingestor.musicxml import MusicXMLError, part_ids, read_musicxml, write_musicxml
+from omr_ingestor.part_identity import raw_part_identities
 from omr_ingestor.status import (
     STAGE_NAMES,
     ItemStatus,
@@ -295,17 +296,8 @@ def _describe_part_identity(identity: PartIdentity | None) -> str:
 def _durations(ctx: _Context) -> str:
     root = read_musicxml(ctx.raw_musicxml)
     ids = tuple(part_ids(root))
-    identities = {
-        part.get("id", ""): PartIdentity(
-            part_name=part.findtext("part-name") or "",
-            instruments=tuple(
-                instrument.findtext("instrument-name") or ""
-                for instrument in part.findall("score-instrument")
-            ),
-        )
-        for part in root.findall("part-list/score-part")
-    }
-    if isinstance(ctx.status.hand_corrected, dict) and ctx.status.part_identities is not None:
+    identities = raw_part_identities(root)
+    if ctx.status.reviewed_part_ids and ctx.status.part_identities is not None:
         mismatches = tuple(
             ReviewSignal(
                 code="part_identity_changed",
@@ -319,7 +311,7 @@ def _durations(ctx: _Context) -> str:
                     "review this part against the source again"
                 ),
             )
-            for pid in ctx.status.hand_corrected
+            for pid in ctx.status.reviewed_part_ids
             if pid not in ids or identities.get(pid) != ctx.status.part_identities[pid]
         )
         if mismatches:
@@ -557,9 +549,10 @@ def _prepare(manifest_path: Path, selector: str, output_dir: Path) -> _Context:
         review_signals=tuple(
             signal
             for signal in previous.review_signals
-            if signal.code == "part_identity_changed" and signal.part_id in previous.hand_corrected
+            if signal.code == "part_identity_changed"
+            and signal.part_id in previous.reviewed_part_ids
         )
-        if previous and isinstance(previous.hand_corrected, dict)
+        if previous
         else (),
         audiveris_options=dict(item.get("audiveris_options", {})),
     )

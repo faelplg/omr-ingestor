@@ -633,14 +633,15 @@ def test_score_wide_annotation_appears_once_with_duplicate_part_ids():
     assert not parts[1].findall("measure/direction")
 
 
-def test_duplicate_part_ids_stop_before_fixup_and_save_signal(setup, monkeypatch, capsys):
+@pytest.mark.parametrize("unsafe_id", ["P1", "   "], ids=["duplicate", "whitespace"])
+def test_unsafe_part_ids_stop_before_fixup_and_save_signal(setup, monkeypatch, capsys, unsafe_id):
     configure_parts(setup, ["Trumpet 1", "Trumpet 2"])
     xml = score(
         {
             pid: [measure(n, (DEFAULT_ATTRS if n == 1 else "") + note(4)) for n in range(1, 4)]
             for pid in ("P1", "P2")
         }
-    ).replace('id="P2"', 'id="P1"')
+    ).replace('id="P2"', f'id="{unsafe_id}"')
     monkeypatch.setenv(AUDIVERIS_ENV_VAR, str(fake_audiveris(setup.bin, [xml])))
 
     def forbidden_fixup(*args, **kwargs):
@@ -982,3 +983,70 @@ def test_prepare_carries_only_identity_changes_for_reviewed_parts(setup, correct
     write_status(previous, ctx.paths.status)
     prepared = _prepare(setup.manifest, "0", setup.output)
     assert prepared.status.review_signals == ((signals[2],) if corrections == {"P1": ()} else ())
+
+
+def test_review_pipeline_output_survives_rerun(setup: Setup, capsys):
+    assert setup.run() == 0
+    before = {
+        p.relative_to(setup.item_dir): p.read_bytes()
+        for p in setup.item_dir.rglob("*")
+        if p.is_file() and p.name != "status.json"
+    }
+    assert main(["review", str(setup.item_dir), "2"]) == 0
+    reviewed = setup.status()
+    assert reviewed.hand_corrected == ("2",)
+    assert reviewed.acceptance.ratio == 0.333333
+    assert reviewed.acceptance.accepted is False
+    assert {
+        p.relative_to(setup.item_dir): p.read_bytes()
+        for p in setup.item_dir.rglob("*")
+        if p.is_file() and p.name != "status.json"
+    } == before
+    assert setup.run() == 0
+    rerun = setup.status()
+    assert rerun.hand_corrected == reviewed.hand_corrected
+    assert rerun.part_identities == reviewed.part_identities
+    assert rerun.acceptance == reviewed.acceptance
+
+
+@pytest.mark.parametrize("change", ["name", "instrument"])
+@pytest.mark.parametrize("corrections", [[], ["2"]], ids=["empty-review", "corrected-review"])
+def test_single_part_review_rejects_changed_identity_and_recovers(
+    setup: Setup, monkeypatch, change, corrections
+):
+    assert setup.run() == 0
+    assert main(["review", str(setup.item_dir), *corrections, "--replace"]) == 0
+    reviewed = setup.status()
+    published = (setup.item_dir / f"{STEM}.mscz").read_bytes()
+    original = ET.fromstring(omr_score())
+    declaration = original.find("part-list/score-part")
+    if change == "name":
+        declaration.find("part-name").text = "Changed name"
+    else:
+        declaration.find("score-instrument/instrument-name").text = "Changed instrument"
+    monkeypatch.setenv(
+        AUDIVERIS_ENV_VAR,
+        str(fake_audiveris(setup.bin, [ET.tostring(original, encoding="unicode")])),
+    )
+    for _ in range(2):
+        assert setup.run() == 1
+        rejected = setup.status()
+        assert rejected.hand_corrected == reviewed.hand_corrected
+        assert rejected.part_identities == reviewed.part_identities
+        assert rejected.acceptance is None
+        assert rejected.stage("durations").status == "failed"
+        assert rejected.stage("fixup").status == "skipped"
+        assert rejected.stage("musescore").status == "skipped"
+        assert [s.code for s in rejected.review_signals] == ["part_identity_changed"]
+        assert rejected.review_signals[0].part_id == reviewed.part_ids[0]
+        assert (setup.item_dir / f"{STEM}.mscz").read_bytes() == published
+    prepared = _prepare(setup.manifest, "0", setup.output)
+    assert prepared.status.acceptance is None
+    assert prepared.status.review_signals == rejected.review_signals
+    assert main(["review", str(setup.item_dir), *corrections, "--replace"]) == 0
+    renewed = setup.status()
+    assert renewed.part_identities != reviewed.part_identities
+    assert renewed.acceptance == reviewed.acceptance
+    assert renewed.review_signals == ()
+    assert setup.run() == 0
+    assert setup.status().acceptance == reviewed.acceptance

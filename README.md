@@ -38,6 +38,28 @@ uv run omr-ingestor run -o output music.json 0   # one item: index, pdf or pdf s
 uv run omr-ingestor batch -o output music.json   # every item, then the cross-part check
 ```
 
+### Record hand corrections
+
+After reviewing an item against the source, record the corrected measure numbers
+exactly as written in its raw MusicXML, including labels such as `12a`:
+
+```sh
+uv run omr-ingestor review output/song-trumpet 7 12a
+uv run omr-ingestor review output/song-duet 7 --part P1
+uv run omr-ingestor review output/song-duet 12a 30 --part P1 --replace
+uv run omr-ingestor review output/song-duet --part P2 --replace --dry-run
+```
+
+Pass the item folder containing `status.json`, not the batch output root.
+`--part` is required for multipart items and optional for single-part items.
+The default adds measures to that part's list; duplicate entries are errors.
+`--replace` replaces the list; with no measure arguments, it records a review
+with no corrections. Other parts keep their reviews; missing entries remain unreviewed.
+The command validates labels against the raw `audiveris/**/*.musicxml` export,
+prints the complete updated status, and writes `status.json` atomically with
+recomputed acceptance. `--dry-run` only prints the result. Score files and
+`batch.json` are never changed. Run `batch` again to refresh its summary.
+
 ### Multiple parts in one PDF
 
 An item can supply `"parts": ["Trumpet 1", "Trumpet 2"]` (see the trumpet item in
@@ -77,7 +99,7 @@ score-wide or part-wide scope).
   An identity mismatch fails the durations stage after recording the signal;
   fixup and conversion are skipped to prevent transforming an ambiguous part.
   Correct the MusicXML part IDs or rerun OMR before attempting instrument fixup.
-- `part_identity_changed`: reruns with per-part corrections compare raw part names
+- `part_identity_changed`: reruns with identity-backed corrections compare raw part names
   and instruments against the recorded identities for each reviewed ID. A
   difference fails durations, keeps prior corrections and sets that part's
   acceptance to `null`. Fixup and conversion are skipped until review is renewed
